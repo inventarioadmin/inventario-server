@@ -1,12 +1,8 @@
-// package.json atualizado
 {
   "name": "inventario-server",
   "version": "1.0.0",
   "description": "Servidor para app de inventário florestal",
   "main": "server.js",
-  "engines": {
-    "node": ">=14.0.0"
-  },
   "scripts": {
     "start": "node server.js"
   },
