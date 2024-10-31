@@ -5,6 +5,8 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
+const path = require('path'); // Adicionando importação do path
+
 const app = express();
 
 // Middlewares
@@ -49,10 +51,10 @@ const authMiddleware = async (req, res, next) => {
     }
 };
 
-// Rotas
+// Rota de login
 app.post('/api/login', async (req, res) => {
     try {
-        const { username, password } = req.body;
+        const { username, password, deviceId } = req.body;
         const user = await User.findOne({ username });
 
         if (!user || !(await bcrypt.compare(password, user.password))) {
@@ -75,7 +77,7 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
-// Rota para dispositivos (protegida)
+// Rotas de dispositivos
 app.get('/api/devices', authMiddleware, async (req, res) => {
     try {
         if (!req.user.isAdmin) {
@@ -101,9 +103,20 @@ app.post('/api/devices', authMiddleware, async (req, res) => {
     }
 });
 
+// Criar pasta public se não existir
+const publicPath = path.join(__dirname, 'public');
+if (!require('fs').existsSync(publicPath)) {
+    require('fs').mkdirSync(publicPath);
+}
+
 // Rota para a página admin
 app.get('/admin', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+
+// Rota padrão
+app.get('/', (req, res) => {
+    res.send('Servidor do Inventário Florestal está rodando!');
 });
 
 // Iniciar servidor

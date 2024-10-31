@@ -3,76 +3,32 @@
 <html>
 <head>
     <title>Painel Admin - Inventário Florestal</title>
+    <meta charset="UTF-8">
     <style>
-        body { 
-            font-family: Arial; 
-            margin: 20px; 
-            background-color: #f0f0f0;
-        }
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .form-group {
-            margin-bottom: 15px;
-        }
-        input, button {
-            padding: 8px;
-            margin: 5px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-        button {
-            background: #4CAF50;
-            color: white;
-            border: none;
-            cursor: pointer;
-        }
-        button:hover {
-            background: #45a049;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-        }
-        th, td {
-            border: 1px solid #ddd;
-            padding: 8px;
-            text-align: left;
-        }
-        th {
-            background-color: #f5f5f5;
-        }
+        body { font-family: Arial; margin: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        input, button { padding: 8px; margin: 5px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Painel Administrativo</h1>
         
-        <!-- Área de Login -->
-        <div id="loginArea">
+        <div id="loginForm">
             <h2>Login</h2>
-            <div class="form-group">
-                <input type="text" id="username" placeholder="Usuário">
-            </div>
-            <div class="form-group">
-                <input type="password" id="password" placeholder="Senha">
-            </div>
+            <input type="text" id="username" placeholder="Usuário">
+            <input type="password" id="password" placeholder="Senha">
             <button onclick="login()">Entrar</button>
         </div>
 
-        <!-- Área de Gestão (inicialmente oculta) -->
         <div id="adminArea" style="display: none;">
             <h2>Gerenciar Dispositivos</h2>
-            <div class="form-group">
+            <div>
                 <input type="text" id="imei" placeholder="IMEI">
                 <input type="text" id="description" placeholder="Descrição">
-                <button onclick="addDevice()">Adicionar Dispositivo</button>
+                <button onclick="addDevice()">Adicionar</button>
             </div>
 
             <h3>Dispositivos Cadastrados</h3>
@@ -85,8 +41,7 @@
                         <th>Último Login</th>
                     </tr>
                 </thead>
-                <tbody id="deviceList">
-                </tbody>
+                <tbody id="deviceList"></tbody>
             </table>
         </div>
     </div>
@@ -101,16 +56,14 @@
             try {
                 const response = await fetch('/api/login', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username, password })
                 });
 
                 const data = await response.json();
                 if (data.success) {
                     authToken = data.authKey;
-                    document.getElementById('loginArea').style.display = 'none';
+                    document.getElementById('loginForm').style.display = 'none';
                     document.getElementById('adminArea').style.display = 'block';
                     loadDevices();
                 } else {
@@ -124,9 +77,7 @@
         async function loadDevices() {
             try {
                 const response = await fetch('/api/devices', {
-                    headers: {
-                        'Authorization': `Bearer ${authToken}`
-                    }
+                    headers: { 'Authorization': `Bearer ${authToken}` }
                 });
                 const devices = await response.json();
                 
