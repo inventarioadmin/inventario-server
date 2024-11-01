@@ -39,14 +39,28 @@ const Device = mongoose.model('Device', {
 const authMiddleware = async (req, res, next) => {
     try {
         const token = req.headers.authorization?.split(' ')[1];
-        if (!token) return res.status(401).json({ message: 'Token não fornecido' });
+        if (!token) {
+            return res.status(401).json({ message: 'Token não fornecido' });
+        }
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await User.findById(decoded.userId);
         
-        if (!user) return res.status(401).json({ message: 'Usuário não encontrado' });
+        // Se for admin, permite acesso direto
+        if (decoded.isAdmin) {
+            req.user = { isAdmin: true };
+            return next();
+        }
+
+        // Se não for admin, verifica o usuário e o dispositivo
+        const user = await User.findById(decoded.userId);
+        const device = await Device.findOne({ imei: decoded.deviceId });
+        
+        if (!user || !device?.isActive) {
+            return res.status(401).json({ message: 'Acesso não autorizado' });
+        }
         
         req.user = user;
+        req.device = device;
         next();
     } catch (error) {
         res.status(401).json({ message: 'Token inválido' });
@@ -57,9 +71,8 @@ const authMiddleware = async (req, res, next) => {
 app.post('/api/login', async (req, res) => {
     try {
         const { username, password, deviceId } = req.body;
-
-        // Verificar usuário e senha
         const user = await User.findOne({ username });
+
         if (!user || !(await bcrypt.compare(password, user.password))) {
             return res.status(401).json({
                 success: false,
@@ -67,7 +80,22 @@ app.post('/api/login', async (req, res) => {
             });
         }
 
-        // Verificar dispositivo e expiração
+        // Se for acesso do painel admin, não verifica deviceId
+        if (deviceId === 'admin-panel') {
+            const token = jwt.sign(
+                { userId: user._id, isAdmin: true },
+                process.env.JWT_SECRET,
+                { expiresIn: '24h' }
+            );
+
+            return res.json({
+                success: true,
+                authKey: token,
+                isAdmin: true
+            });
+        }
+
+        // Se não for admin, verifica o dispositivo
         const device = await Device.findOne({ imei: deviceId });
         if (!device || !device.isActive) {
             return res.status(401).json({
@@ -76,19 +104,6 @@ app.post('/api/login', async (req, res) => {
             });
         }
 
-        // Verificar se está expirado
-        if (device.expirationDate < new Date()) {
-            return res.status(401).json({
-                success: false,
-                message: 'Licença expirada. Entre em contato com o suporte.',
-                expired: true
-            });
-        }
-
-        // Calcular dias restantes
-        const daysRemaining = Math.ceil((device.expirationDate - new Date()) / (1000 * 60 * 60 * 24));
-
-        // Atualizar último login
         device.lastLogin = new Date();
         await device.save();
 
@@ -101,7 +116,7 @@ app.post('/api/login', async (req, res) => {
         res.json({
             success: true,
             authKey: token,
-            daysRemaining: daysRemaining
+            isAdmin: false
         });
 
     } catch (error) {

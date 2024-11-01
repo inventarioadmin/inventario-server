@@ -11,23 +11,29 @@ const User = mongoose.model('User', {
 
 async function createAdmin() {
     try {
-        console.log('Conectando ao MongoDB...');
         await mongoose.connect(process.env.MONGODB_URI);
-        console.log('Conectado!');
-
-        const hashedPassword = await bcrypt.hash('admin123', 10);
         
-        const admin = new User({
-            username: 'admin',
-            password: hashedPassword,
-            isAdmin: true
-        });
-
-        await admin.save();
-        console.log('Admin criado com sucesso!');
-        console.log('Username: admin');
-        console.log('Senha: admin123');
-
+        // Verifica se já existe
+        let admin = await User.findOne({ username: 'planforte' });
+        
+        if (admin) {
+            console.log('Atualizando senha do admin existente...');
+            admin.password = await bcrypt.hash('PlanADM042072', 10);
+            await admin.save();
+        } else {
+            console.log('Criando novo admin...');
+            admin = new User({
+                username: 'planforte',
+                password: await bcrypt.hash('PlanADM042072', 10),
+                isAdmin: true
+            });
+            await admin.save();
+        }
+        
+        console.log('Admin criado/atualizado com sucesso!');
+        console.log('Username: planforte');
+        console.log('Senha: PlanADM042072');
+        
     } catch (error) {
         console.error('Erro:', error);
     } finally {
