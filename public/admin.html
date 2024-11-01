@@ -7,6 +7,36 @@
         body { 
             font-family: Arial; 
             margin: 20px; 
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        input, button {
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        .btn-danger {
+            background: #dc3545;
+        }
+        .btn-danger:hover {
+            background: #c82333;
         }
         table {
             width: 100%;
@@ -15,31 +45,32 @@
         }
         th, td {
             border: 1px solid #ddd;
-            padding: 8px;
+            padding: 12px 8px;
             text-align: left;
         }
-        button {
-            margin: 2px;
-            padding: 5px 10px;
-            cursor: pointer;
+        th {
+            background: #f8f9fa;
         }
-        .btn-danger {
-            background-color: #dc3545;
-            color: white;
-            border: none;
-            border-radius: 3px;
+        .days-remaining {
+            color: #28a745;
+            font-weight: bold;
         }
-        .btn-warning {
-            background-color: #ffc107;
-            border: none;
-            border-radius: 3px;
+        .days-warning {
+            color: #ffc107;
+            font-weight: bold;
         }
-
-        #loginForm {
-            margin-bottom: 20px;
+        .days-danger {
+            color: #dc3545;
+            font-weight: bold;
         }
-        .hidden {
-            display: none;
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .input-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 15px;
         }
     </style>
 </head>
@@ -47,118 +78,87 @@
     <div class="container">
         <h1>Painel Administrativo</h1>
         
-        <!-- Área de Login -->
-        <div id="loginForm">
-            <h2>Login</h2>
-            <input type="text" id="username" placeholder="Usuário">
-            <input type="password" id="password" placeholder="Senha">
-            <button onclick="login()">Entrar</button>
+        <h2>Gerenciar Dispositivos</h2>
+        <div class="input-group">
+            <div>
+                <input type="text" id="imei" placeholder="IMEI" style="width: 200px;">
+            </div>
+            <div>
+                <input type="text" id="description" placeholder="Descrição" style="width: 200px;">
+            </div>
+            <div>
+                <input type="number" id="duration" placeholder="Duração em dias" value="30" min="1" style="width: 120px;">
+            </div>
+            <button onclick="addDevice()">Adicionar Dispositivo</button>
         </div>
 
-        <!-- Área de Gerenciamento (inicialmente oculta) -->
-        <div id="managementArea" class="hidden">
-            <h2>Gerenciar Dispositivos</h2>
-            <div>
-                <input type="text" id="imei" placeholder="IMEI">
-                <input type="text" id="description" placeholder="Descrição">
-                <button onclick="addDevice()">Adicionar</button>
-            </div>
-
-            <div>
-                <h3>Dispositivos Cadastrados</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>IMEI</th>
-                            <th>Descrição</th>
-                            <th>Status</th>
-                            <th>Último Login</th>
-                            <th>Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody id="deviceList"></tbody>
-                </table>
-            </div>
-        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>IMEI</th>
+                    <th>Descrição</th>
+                    <th>Status</th>
+                    <th>Dias Restantes</th>
+                    <th>Data de Expiração</th>
+                    <th>Ações</th>
+                </tr>
+            </thead>
+            <tbody id="deviceList"></tbody>
+        </table>
     </div>
 
     <script>
-        let authToken = '';
+        function getDaysRemaining(expirationDate) {
+            const now = new Date();
+            const expDate = new Date(expirationDate);
+            const diffTime = expDate - now;
+            return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        }
 
-        async function login() {
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
-
-            try {
-                const response = await fetch('/api/login', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        username: username,
-                        password: password,
-                        deviceId: 'admin-panel'
-                    })
-                });
-
-                const data = await response.json();
-                if (data.success) {
-                    authToken = data.authKey;
-                    document.getElementById('loginForm').classList.add('hidden');
-                    document.getElementById('managementArea').classList.remove('hidden');
-                    loadDevices();
-                } else {
-                    alert('Login falhou: ' + (data.message || 'Credenciais inválidas'));
-                }
-            } catch (error) {
-                alert('Erro ao fazer login: ' + error.message);
-            }
+        function getDaysClass(days) {
+            if (days <= 0) return 'days-danger';
+            if (days <= 7) return 'days-warning';
+            return 'days-remaining';
         }
 
         async function loadDevices() {
             try {
-                const response = await fetch('/api/devices', {
-                    headers: {
-                        'Authorization': `Bearer ${authToken}`
-                    }
-                });
-                
-                if (!response.ok) {
-                    throw new Error('Erro ao carregar dispositivos');
-                }
-
+                const response = await fetch('/api/devices');
                 const devices = await response.json();
+                
                 const tbody = document.getElementById('deviceList');
-                tbody.innerHTML = devices.map(device => `
-                    <tr>
-                        <td>${device.imei}</td>
-                        <td>${device.description || ''}</td>
-                        <td class="${device.isActive ? 'status-active' : 'status-inactive'}">
-                            ${device.isActive ? 'Ativo' : 'Inativo'}
-                        </td>
-                        <td>${device.lastLogin ? new Date(device.lastLogin).toLocaleString() : 'Nunca'}</td>
-                        <td>
-                            <button onclick="toggleDevice('${device.imei}')" class="btn-warning">
-                                ${device.isActive ? 'Desativar' : 'Ativar'}
-                            </button>
-                            <button onclick="removeDevice('${device.imei}')" class="btn-danger">
-                                Excluir
-                            </button>
-                        </td>
-                    </tr>
-                `).join('');
+                tbody.innerHTML = devices.map(device => {
+                    const daysRemaining = getDaysRemaining(device.expirationDate);
+                    const daysClass = getDaysClass(daysRemaining);
+                    
+                    return `
+                        <tr>
+                            <td>${device.imei}</td>
+                            <td>${device.description || ''}</td>
+                            <td>${device.isActive ? 'Ativo' : 'Inativo'}</td>
+                            <td class="${daysClass}">
+                                ${daysRemaining} dias
+                            </td>
+                            <td>${new Date(device.expirationDate).toLocaleDateString()}</td>
+                            <td>
+                                <button onclick="removeDevice('${device.imei}')" class="btn-danger">
+                                    Excluir
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
             } catch (error) {
                 console.error('Erro:', error);
-                alert('Erro ao carregar dispositivos: ' + error.message);
             }
         }
 
         async function addDevice() {
             const imei = document.getElementById('imei').value;
             const description = document.getElementById('description').value;
+            const duration = parseInt(document.getElementById('duration').value);
 
-            if (!imei || !description) {
+            if (!imei || !description || !duration) {
                 alert('Preencha todos os campos');
                 return;
             }
@@ -167,10 +167,13 @@
                 const response = await fetch('/api/devices', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${authToken}`
+                        'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ imei, description })
+                    body: JSON.stringify({ 
+                        imei, 
+                        description,
+                        durationDays: duration 
+                    })
                 });
 
                 const data = await response.json();
@@ -180,10 +183,10 @@
                     loadDevices();
                     alert('Dispositivo adicionado com sucesso!');
                 } else {
-                    throw new Error(data.message || 'Erro ao adicionar dispositivo');
+                    alert(data.message || 'Erro ao adicionar dispositivo');
                 }
             } catch (error) {
-                alert('Erro ao adicionar dispositivo: ' + error.message);
+                alert('Erro ao adicionar dispositivo');
             }
         }
 
@@ -194,10 +197,7 @@
 
             try {
                 const response = await fetch(`/api/devices/${imei}`, {
-                    method: 'DELETE',
-                    headers: {
-                        'Authorization': `Bearer ${authToken}`
-                    }
+                    method: 'DELETE'
                 });
 
                 const data = await response.json();
@@ -205,32 +205,18 @@
                     loadDevices();
                     alert('Dispositivo excluído com sucesso!');
                 } else {
-                    throw new Error(data.message || 'Erro ao excluir dispositivo');
+                    alert(data.message || 'Erro ao excluir dispositivo');
                 }
             } catch (error) {
-                alert('Erro ao excluir dispositivo: ' + error.message);
+                alert('Erro ao excluir dispositivo');
             }
         }
 
-        async function toggleDevice(imei) {
-            try {
-                const response = await fetch(`/api/devices/${imei}`, {
-                    method: 'PUT',
-                    headers: {
-                        'Authorization': `Bearer ${authToken}`
-                    }
-                });
+        // Carregar dispositivos quando a página abrir
+        loadDevices();
 
-                const data = await response.json();
-                if (data.success) {
-                    loadDevices();
-                } else {
-                    throw new Error(data.message || 'Erro ao alterar status do dispositivo');
-                }
-            } catch (error) {
-                alert('Erro ao alterar status do dispositivo: ' + error.message);
-            }
-        }
+        // Atualizar a lista a cada minuto
+        setInterval(loadDevices, 60000);
     </script>
 </body>
 </html>
