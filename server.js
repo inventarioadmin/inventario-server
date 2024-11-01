@@ -31,8 +31,41 @@ const Device = mongoose.model('Device', {
     description: String,
     isActive: { type: Boolean, default: true },
     lastLogin: Date,
-    expirationDate: { type: Date, required: true }, // Nova propriedade
+    expirationDate: Date,  // Data de expiração
     createdAt: { type: Date, default: Date.now }
+});
+
+// Rota para adicionar dispositivo
+app.post('/api/devices', authMiddleware, async (req, res) => {
+    try {
+        const { imei, description, durationDays = 30 } = req.body;
+
+        // Calcula a data de expiração
+        const expirationDate = new Date();
+        expirationDate.setDate(expirationDate.getDate() + parseInt(durationDays));
+
+        const device = new Device({
+            imei,
+            description,
+            isActive: true,
+            expirationDate
+        });
+
+        await device.save();
+        res.json({ success: true, device });
+    } catch (error) {
+        if (error.code === 11000) {
+            res.status(400).json({
+                success: false,
+                message: 'IMEI já cadastrado'
+            });
+        } else {
+            res.status(500).json({
+                success: false,
+                message: error.message || 'Erro ao adicionar dispositivo'
+            });
+        }
+    }
 });
 
 // Middleware de autenticação

@@ -130,81 +130,100 @@
         }
 
         async function loadDevices() {
-            try {
-                const response = await fetch('/api/devices', {
-                    headers: {
-                        'Authorization': `Bearer ${authToken}`
-                    }
-                });
-                
-                if (!response.ok) {
-                    throw new Error('Erro ao carregar dispositivos');
-                }
-
-                const devices = await response.json();
-                const tbody = document.getElementById('deviceList');
-                tbody.innerHTML = devices.map(device => `
-                    <tr>
-                        <td>${device.imei}</td>
-                        <td>${device.description || ''}</td>
-                        <td>${device.isActive ? 'Ativo' : 'Inativo'}</td>
-                        <td>${device.lastLogin ? new Date(device.lastLogin).toLocaleString() : 'Nunca'}</td>
-                        <td>
-                            <button onclick="toggleDevice('${device.imei}')" style="margin-right: 5px;">
-                                ${device.isActive ? 'Desativar' : 'Ativar'}
-                            </button>
-                            <button onclick="removeDevice('${device.imei}')" class="btn-danger">
-                                Excluir
-                            </button>
-                        </td>
-                    </tr>
-                `).join('');
-            } catch (error) {
-                console.error('Erro:', error);
-                if (error.message.includes('token')) {
-                    document.getElementById('managementArea').classList.add('hidden');
-                    document.getElementById('loginArea').classList.remove('hidden');
-                }
+    try {
+        const response = await fetch('/api/devices', {
+            headers: {
+                'Authorization': `Bearer ${authToken}`
             }
+        });
+        
+        if (!response.ok) {
+            throw new Error('Erro ao carregar dispositivos');
         }
+
+        const devices = await response.json();
+        const tbody = document.getElementById('deviceList');
+        tbody.innerHTML = devices.map(device => {
+            const expirationDate = new Date(device.expirationDate);
+            const now = new Date();
+            const daysRemaining = Math.ceil((expirationDate - now) / (1000 * 60 * 60 * 24));
+            const expirationStatus = daysRemaining <= 0 ? 'Expirado' : 
+                                   daysRemaining <= 7 ? `${daysRemaining} dias (Atenção!)` : 
+                                   `${daysRemaining} dias`;
+            const statusColor = daysRemaining <= 0 ? 'red' : 
+                              daysRemaining <= 7 ? 'orange' : 
+                              'green';
+            
+            return `
+                <tr>
+                    <td>${device.imei}</td>
+                    <td>${device.description || ''}</td>
+                    <td style="color: ${device.isActive ? 'green' : 'red'}">
+                        ${device.isActive ? 'Ativo' : 'Inativo'}
+                    </td>
+                    <td style="color: ${statusColor}">
+                        ${expirationStatus}
+                    </td>
+                    <td>${device.lastLogin ? new Date(device.lastLogin).toLocaleString() : 'Nunca'}</td>
+                    <td>
+                        <button onclick="toggleDevice('${device.imei}')" style="margin-right: 5px;">
+                            ${device.isActive ? 'Desativar' : 'Ativar'}
+                        </button>
+                        <button onclick="removeDevice('${device.imei}')" class="btn-danger">
+                            Excluir
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    } catch (error) {
+        console.error('Erro:', error);
+        if (error.message.includes('token')) {
+            // Reset para tela de login se token expirou
+            document.getElementById('managementArea').classList.add('hidden');
+            document.getElementById('loginArea').classList.remove('hidden');
+        }
+    }
+}
 
         async function addDevice() {
-            const imei = document.getElementById('imei').value;
-            const description = document.getElementById('description').value;
-            const duration = parseInt(document.getElementById('duration').value);
+    const imei = document.getElementById('imei').value;
+    const description = document.getElementById('description').value;
+    const durationDays = parseInt(document.getElementById('duration').value);
 
-            if (!imei || !description || !duration) {
-                alert('Preencha todos os campos');
-                return;
-            }
+    if (!imei || !description || !durationDays) {
+        alert('Preencha todos os campos');
+        return;
+    }
 
-            try {
-                const response = await fetch('/api/devices', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${authToken}`
-                    },
-                    body: JSON.stringify({ 
-                        imei, 
-                        description,
-                        durationDays: duration 
-                    })
-                });
+    try {
+        const response = await fetch('/api/devices', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ 
+                imei, 
+                description,
+                durationDays 
+            })
+        });
 
-                const data = await response.json();
-                if (data.success) {
-                    document.getElementById('imei').value = '';
-                    document.getElementById('description').value = '';
-                    loadDevices();
-                    alert('Dispositivo adicionado com sucesso!');
-                } else {
-                    throw new Error(data.message || 'Erro ao adicionar dispositivo');
-                }
-            } catch (error) {
-                alert(error.message);
-            }
+        const data = await response.json();
+        if (data.success) {
+            document.getElementById('imei').value = '';
+            document.getElementById('description').value = '';
+            document.getElementById('duration').value = '30';  // Reset para 30 dias
+            loadDevices();
+            alert('Dispositivo adicionado com sucesso!');
+        } else {
+            throw new Error(data.message || 'Erro ao adicionar dispositivo');
         }
+    } catch (error) {
+        alert(error.message || 'Erro ao adicionar dispositivo');
+    }
+}
 
         async function removeDevice(imei) {
             if (!confirm('Tem certeza que deseja excluir este dispositivo?')) {
