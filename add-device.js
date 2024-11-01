@@ -44,5 +44,5 @@ async function addDevice(imei, description, monthsValid) {
 }
 
 // Substitua '123456789' pelo IMEI real do dispositivo
-addDevice('864048069134421', 'Dispositivo de Teste1', 12);
-addDevice('864048069134439', 'Dispositivo de Teste2', 12);
+addDevice('864048069134421', 'Dispositivo de Teste1', 365);
+addDevice('864048069134439', 'Dispositivo de Teste2', 365);
