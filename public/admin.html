@@ -34,64 +34,127 @@
             border: none;
             border-radius: 3px;
         }
+
+        #loginForm {
+            margin-bottom: 20px;
+        }
+        .hidden {
+            display: none;
+        }
     </style>
 </head>
 <body>
-    <h1>Painel Administrativo</h1>
-    
-    <div>
-        <h2>Gerenciar Dispositivos</h2>
-        <input type="text" id="imei" placeholder="IMEI">
-        <input type="text" id="description" placeholder="Descrição">
-        <button onclick="addDevice()">Adicionar</button>
-    </div>
+    <div class="container">
+        <h1>Painel Administrativo</h1>
+        
+        <!-- Área de Login -->
+        <div id="loginForm">
+            <h2>Login</h2>
+            <input type="text" id="username" placeholder="Usuário">
+            <input type="password" id="password" placeholder="Senha">
+            <button onclick="login()">Entrar</button>
+        </div>
 
-    <div>
-        <h3>Dispositivos Cadastrados</h3>
-        <table>
-            <thead>
-                <tr>
-                    <th>IMEI</th>
-                    <th>Descrição</th>
-                    <th>Status</th>
-                    <th>Último Login</th>
-                    <th>Ações</th>
-                </tr>
-            </thead>
-            <tbody id="deviceList"></tbody>
-        </table>
+        <!-- Área de Gerenciamento (inicialmente oculta) -->
+        <div id="managementArea" class="hidden">
+            <h2>Gerenciar Dispositivos</h2>
+            <div>
+                <input type="text" id="imei" placeholder="IMEI">
+                <input type="text" id="description" placeholder="Descrição">
+                <button onclick="addDevice()">Adicionar</button>
+            </div>
+
+            <div>
+                <h3>Dispositivos Cadastrados</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>IMEI</th>
+                            <th>Descrição</th>
+                            <th>Status</th>
+                            <th>Último Login</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="deviceList"></tbody>
+                </table>
+            </div>
+        </div>
     </div>
 
     <script>
-        function loadDevices() {
-            fetch('/api/devices')
-                .then(response => response.json())
-                .then(devices => {
-                    const tbody = document.getElementById('deviceList');
-                    tbody.innerHTML = devices.map(device => `
-                        <tr>
-                            <td>${device.imei}</td>
-                            <td>${device.description || ''}</td>
-                            <td>${device.isActive ? 'Ativo' : 'Inativo'}</td>
-                            <td>${device.lastLogin ? new Date(device.lastLogin).toLocaleString() : 'Nunca'}</td>
-                            <td>
-                                <button onclick="toggleDevice('${device.imei}')" class="btn-warning">
-                                    ${device.isActive ? 'Desativar' : 'Ativar'}
-                                </button>
-                                <button onclick="removeDevice('${device.imei}')" class="btn-danger">
-                                    Excluir
-                                </button>
-                            </td>
-                        </tr>
-                    `).join('');
-                })
-                .catch(error => {
-                    console.error('Erro ao carregar dispositivos:', error);
-                    alert('Erro ao carregar dispositivos');
+        let authToken = '';
+
+        async function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: username,
+                        password: password,
+                        deviceId: 'admin-panel'
+                    })
                 });
+
+                const data = await response.json();
+                if (data.success) {
+                    authToken = data.authKey;
+                    document.getElementById('loginForm').classList.add('hidden');
+                    document.getElementById('managementArea').classList.remove('hidden');
+                    loadDevices();
+                } else {
+                    alert('Login falhou: ' + (data.message || 'Credenciais inválidas'));
+                }
+            } catch (error) {
+                alert('Erro ao fazer login: ' + error.message);
+            }
         }
 
-        function addDevice() {
+        async function loadDevices() {
+            try {
+                const response = await fetch('/api/devices', {
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Erro ao carregar dispositivos');
+                }
+
+                const devices = await response.json();
+                const tbody = document.getElementById('deviceList');
+                tbody.innerHTML = devices.map(device => `
+                    <tr>
+                        <td>${device.imei}</td>
+                        <td>${device.description || ''}</td>
+                        <td class="${device.isActive ? 'status-active' : 'status-inactive'}">
+                            ${device.isActive ? 'Ativo' : 'Inativo'}
+                        </td>
+                        <td>${device.lastLogin ? new Date(device.lastLogin).toLocaleString() : 'Nunca'}</td>
+                        <td>
+                            <button onclick="toggleDevice('${device.imei}')" class="btn-warning">
+                                ${device.isActive ? 'Desativar' : 'Ativar'}
+                            </button>
+                            <button onclick="removeDevice('${device.imei}')" class="btn-danger">
+                                Excluir
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                console.error('Erro:', error);
+                alert('Erro ao carregar dispositivos: ' + error.message);
+            }
+        }
+
+        async function addDevice() {
             const imei = document.getElementById('imei').value;
             const description = document.getElementById('description').value;
 
@@ -100,70 +163,74 @@
                 return;
             }
 
-            fetch('/api/devices', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ imei, description })
-            })
-            .then(response => {
-                if (response.ok) {
+            try {
+                const response = await fetch('/api/devices', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: JSON.stringify({ imei, description })
+                });
+
+                const data = await response.json();
+                if (data.success) {
                     document.getElementById('imei').value = '';
                     document.getElementById('description').value = '';
                     loadDevices();
                     alert('Dispositivo adicionado com sucesso!');
                 } else {
-                    throw new Error('Erro ao adicionar dispositivo');
+                    throw new Error(data.message || 'Erro ao adicionar dispositivo');
                 }
-            })
-            .catch(error => {
-                console.error('Erro:', error);
-                alert('Erro ao adicionar dispositivo');
-            });
+            } catch (error) {
+                alert('Erro ao adicionar dispositivo: ' + error.message);
+            }
         }
 
-        function removeDevice(imei) {
+        async function removeDevice(imei) {
             if (!confirm('Tem certeza que deseja excluir este dispositivo?')) {
                 return;
             }
 
-            fetch(`/api/devices/${imei}`, {
-                method: 'DELETE'
-            })
-            .then(response => {
-                if (response.ok) {
+            try {
+                const response = await fetch(`/api/devices/${imei}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+
+                const data = await response.json();
+                if (data.success) {
                     loadDevices();
                     alert('Dispositivo excluído com sucesso!');
                 } else {
-                    throw new Error('Erro ao excluir dispositivo');
+                    throw new Error(data.message || 'Erro ao excluir dispositivo');
                 }
-            })
-            .catch(error => {
-                console.error('Erro:', error);
-                alert('Erro ao excluir dispositivo');
-            });
+            } catch (error) {
+                alert('Erro ao excluir dispositivo: ' + error.message);
+            }
         }
 
-        function toggleDevice(imei) {
-            fetch(`/api/devices/${imei}`, {
-                method: 'PUT'
-            })
-            .then(response => {
-                if (response.ok) {
+        async function toggleDevice(imei) {
+            try {
+                const response = await fetch(`/api/devices/${imei}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+
+                const data = await response.json();
+                if (data.success) {
                     loadDevices();
                 } else {
-                    throw new Error('Erro ao alterar status do dispositivo');
+                    throw new Error(data.message || 'Erro ao alterar status do dispositivo');
                 }
-            })
-            .catch(error => {
-                console.error('Erro:', error);
-                alert('Erro ao alterar status do dispositivo');
-            });
+            } catch (error) {
+                alert('Erro ao alterar status do dispositivo: ' + error.message);
+            }
         }
-
-        // Carregar dispositivos ao iniciar
-        loadDevices();
     </script>
 </body>
 </html>
