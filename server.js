@@ -5,16 +5,16 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
-const path = require('path'); // Adicionando importação do path
+const path = require('path');
 
 const app = express();
 
-// Middlewares
+// Middlewares básicos
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// Conectar ao MongoDB
+// Conexão MongoDB
 mongoose.connect(process.env.MONGODB_URI)
     .then(() => console.log('MongoDB Conectado'))
     .catch(err => console.error('Erro MongoDB:', err));
@@ -31,41 +31,8 @@ const Device = mongoose.model('Device', {
     description: String,
     isActive: { type: Boolean, default: true },
     lastLogin: Date,
-    expirationDate: Date,  // Data de expiração
+    expirationDate: Date,
     createdAt: { type: Date, default: Date.now }
-});
-
-// Rota para adicionar dispositivo
-app.post('/api/devices', authMiddleware, async (req, res) => {
-    try {
-        const { imei, description, durationDays = 30 } = req.body;
-
-        // Calcula a data de expiração
-        const expirationDate = new Date();
-        expirationDate.setDate(expirationDate.getDate() + parseInt(durationDays));
-
-        const device = new Device({
-            imei,
-            description,
-            isActive: true,
-            expirationDate
-        });
-
-        await device.save();
-        res.json({ success: true, device });
-    } catch (error) {
-        if (error.code === 11000) {
-            res.status(400).json({
-                success: false,
-                message: 'IMEI já cadastrado'
-            });
-        } else {
-            res.status(500).json({
-                success: false,
-                message: error.message || 'Erro ao adicionar dispositivo'
-            });
-        }
-    }
 });
 
 // Middleware de autenticação
@@ -100,7 +67,7 @@ const authMiddleware = async (req, res, next) => {
     }
 };
 
-// Rota de login
+// Rotas
 app.post('/api/login', async (req, res) => {
     try {
         const { username, password, deviceId } = req.body;
@@ -137,6 +104,14 @@ app.post('/api/login', async (req, res) => {
             });
         }
 
+        // Verifica se o dispositivo está expirado
+        if (device.expirationDate && new Date() > new Date(device.expirationDate)) {
+            return res.status(401).json({
+                success: false,
+                message: 'Licença expirada'
+            });
+        }
+
         device.lastLogin = new Date();
         await device.save();
 
@@ -148,8 +123,7 @@ app.post('/api/login', async (req, res) => {
 
         res.json({
             success: true,
-            authKey: token,
-            isAdmin: false
+            authKey: token
         });
 
     } catch (error) {
@@ -160,14 +134,10 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
-// Rotas de dispositivos
 // Rota para listar dispositivos
 app.get('/api/devices', authMiddleware, async (req, res) => {
     try {
-        if (!req.user.isAdmin) {
-            return res.status(403).json({ message: 'Acesso negado' });
-        }
-        const devices = await Device.find();
+        const devices = await Device.find().sort('-createdAt');
         res.json(devices);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -177,24 +147,39 @@ app.get('/api/devices', authMiddleware, async (req, res) => {
 // Rota para adicionar dispositivo
 app.post('/api/devices', authMiddleware, async (req, res) => {
     try {
-        if (!req.user.isAdmin) {
-            return res.status(403).json({ message: 'Acesso negado' });
-        }
-        const device = new Device(req.body);
+        const { imei, description, durationDays = 30 } = req.body;
+
+        // Calcula a data de expiração
+        const expirationDate = new Date();
+        expirationDate.setDate(expirationDate.getDate() + parseInt(durationDays));
+
+        const device = new Device({
+            imei,
+            description,
+            isActive: true,
+            expirationDate
+        });
+
         await device.save();
         res.json({ success: true, device });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        if (error.code === 11000) {
+            res.status(400).json({
+                success: false,
+                message: 'IMEI já cadastrado'
+            });
+        } else {
+            res.status(500).json({
+                success: false,
+                message: error.message || 'Erro ao adicionar dispositivo'
+            });
+        }
     }
 });
 
 // Rota para excluir dispositivo
 app.delete('/api/devices/:imei', authMiddleware, async (req, res) => {
     try {
-        if (!req.user.isAdmin) {
-            return res.status(403).json({ message: 'Acesso negado' });
-        }
-
         const device = await Device.findOneAndDelete({ imei: req.params.imei });
         
         if (!device) {
@@ -219,51 +204,38 @@ app.delete('/api/devices/:imei', authMiddleware, async (req, res) => {
 // Rota para ativar/desativar dispositivo
 app.put('/api/devices/:imei', authMiddleware, async (req, res) => {
     try {
-        if (!req.user.isAdmin) {
-            return res.status(403).json({ message: 'Acesso negado' });
-        }
         const device = await Device.findOne({ imei: req.params.imei });
+        
         if (!device) {
-            return res.status(404).json({ message: 'Dispositivo não encontrado' });
+            return res.status(404).json({ 
+                success: false,
+                message: 'Dispositivo não encontrado' 
+            });
         }
+
         device.isActive = !device.isActive;
         await device.save();
-        res.json({ success: true, device });
+        
+        res.json({ 
+            success: true, 
+            device 
+        });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ 
+            success: false,
+            message: 'Erro ao atualizar dispositivo' 
+        });
     }
 });
 
-// Criar pasta public se não existir
-const publicPath = path.join(__dirname, 'public');
-if (!require('fs').existsSync(publicPath)) {
-    require('fs').mkdirSync(publicPath);
-}
-
-// Rota para a página admin
+// Rota para o painel admin
 app.get('/admin', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
 
-// Rota padrão
-app.get('/', (req, res) => {
-    res.send('Servidor do Inventário Florestal está rodando!');
-});
-
-// Iniciar servidor
+// Inicialização do servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Servidor rodando na porta ${PORT}`);
     console.log(`Ambiente: ${process.env.NODE_ENV || 'desenvolvimento'}`);
-});
-app.get('/admin', (req, res) => {
-    const filePath = path.join(__dirname, 'public', 'admin.html');
-    console.log('Tentando servir arquivo:', filePath);
-    console.log('Arquivo existe:', require('fs').existsSync(filePath));
-    res.sendFile(filePath);
-});
-
-// E adicione um endpoint de teste
-app.get('/test-admin', (req, res) => {
-    res.send('Admin endpoint está funcionando!');
 });
