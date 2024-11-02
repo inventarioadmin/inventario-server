@@ -67,6 +67,15 @@ const authMiddleware = async (req, res, next) => {
     }
 };
 
+// Função auxiliar para calcular dias restantes
+function calculateRemainingDays(expirationDate) {
+    const now = new Date();
+    const expDate = new Date(expirationDate);
+    const diffTime = expDate - now;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return Math.max(0, diffDays); // Retorna 0 se já expirou
+};
+
 // Rotas
 app.post('/api/login', async (req, res) => {
     try {
@@ -104,14 +113,18 @@ app.post('/api/login', async (req, res) => {
             });
         }
 
-        // Verifica se o dispositivo está expirado
-        if (device.expirationDate && new Date() > new Date(device.expirationDate)) {
+        // Calcula dias restantes
+        const diasRestantes = calculateRemainingDays(device.expirationDate);
+        
+        // Verifica se está expirado
+        if (diasRestantes <= 0) {
             return res.status(401).json({
                 success: false,
                 message: 'Licença expirada'
             });
         }
 
+        // Atualiza último login
         device.lastLogin = new Date();
         await device.save();
 
@@ -121,12 +134,15 @@ app.post('/api/login', async (req, res) => {
             { expiresIn: '24h' }
         );
 
+        // Retorna o token e os dias restantes
         res.json({
             success: true,
-            authKey: token
+            authKey: token,
+            diasRestantes: diasRestantes // Adiciona os dias restantes na resposta
         });
 
     } catch (error) {
+        console.error('Erro no login:', error);
         res.status(500).json({
             success: false,
             message: 'Erro interno do servidor'
@@ -138,7 +154,18 @@ app.post('/api/login', async (req, res) => {
 app.get('/api/devices', authMiddleware, async (req, res) => {
     try {
         const devices = await Device.find().sort('-createdAt');
-        res.json(devices);
+        
+        // Adiciona dias restantes para cada dispositivo
+        const devicesWithDays = devices.map(device => {
+            const diasRestantes = calculateRemainingDays(device.expirationDate);
+            return {
+                ...device.toObject(),
+                diasRestantes: diasRestantes,
+                status: device.isActive ? (diasRestantes > 0 ? 'Ativo' : 'Expirado') : 'Desativado'
+            };
+        });
+        
+        res.json(devicesWithDays);
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -239,3 +266,5 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`Servidor rodando na porta ${PORT}`);
     console.log(`Ambiente: ${process.env.NODE_ENV || 'desenvolvimento'}`);
 });
+
+
