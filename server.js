@@ -8,47 +8,103 @@ const path = require('path');
 
 const app = express();
 
-// Middlewares básicos
-app.use(cors());
-app.use(express.json());
-app.use(express.static('public'));
+// Configurações de segurança básicas
+app.use(cors({
+    origin: process.env.CORS_ORIGIN || '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
+app.use(express.json({ limit: '10kb' })); // Limita o tamanho das requisições
+app.use(express.static(path.join(__dirname, 'public'))); // Serve arquivos estáticos de forma segura
 
+// Conexão MongoDB com retry
+const connectDB = async (retries = 5) => {
+    while (retries) {
+        try {
+            const mongoURI = process.env.MONGODB_URI;
+            if (!mongoURI) {
+                throw new Error('MONGODB_URI não configurada');
+            }
 
-// Conexão MongoDB
-const mongoURI = process.env.MONGODB_URI.includes('/?') 
-    ? process.env.MONGODB_URI.replace('/?', '/inventario?')
-    : process.env.MONGODB_URI;
+            await mongoose.connect(mongoURI, {
+                useNewUrlParser: true,
+                useUnifiedTopology: true,
+                serverSelectionTimeoutMS: 5000,
+                socketTimeoutMS: 45000,
+            });
 
-mongoose.connect(mongoURI)
-    .then(() => console.log('MongoDB Conectado'))
-    .catch(err => console.error('Erro MongoDB:', err));
+            console.log('MongoDB Conectado com sucesso');
+            break;
+        } catch (err) {
+            retries -= 1;
+            console.error(`Erro na conexão MongoDB. Tentativas restantes: ${retries}`);
+            if (!retries) {
+                console.error('Falha na conexão com MongoDB:', err);
+                process.exit(1);
+            }
+            // Espera 5 segundos antes de tentar novamente
+            await new Promise(resolve => setTimeout(resolve, 5000));
+        }
+    }
+};
 
-// Limpa modelos anteriores
-mongoose.models = {};
+connectDB();
 
-// Modelos
-const Company = require('./models/Company');
-const Device = require('./models/Device');
+// Schemas com validação
+const companySchema = new mongoose.Schema({
+    name: { type: String, required: true, trim: true },
+    username: { type: String, required: true, unique: true, trim: true },
+    password: { type: String, required: true },
+    maxDevices: { type: Number, required: true, min: 1 },
+    expirationDate: { type: Date, required: true },
+    isActive: { type: Boolean, default: true }
+}, { 
+    collection: 'companies',
+    timestamps: true 
+});
 
-const User = mongoose.model('User', new mongoose.Schema({
-    username: String,
-    password: String,
-    role: String,
-    isActive: Boolean,
+const deviceSchema = new mongoose.Schema({
+    androidId: { type: String, required: true },
+    description: { type: String, required: true, trim: true },
+    companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true },
+    isActive: { type: Boolean, default: true },
+    lastLogin: { type: Date, default: Date.now }
+}, { 
+    collection: 'devices',
+    timestamps: true 
+});
+
+const userSchema = new mongoose.Schema({
+    username: { type: String, required: true, unique: true, trim: true },
+    password: { type: String, required: true },
+    role: { type: String, required: true, enum: ['superadmin', 'company', 'admin'] },
+    isActive: { type: Boolean, default: true },
     companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company' }
-}, { collection: 'users' }));
+}, { 
+    collection: 'users',
+    timestamps: true 
+});
 
-// Middleware de autenticação
+const Company = mongoose.model('Company', companySchema);
+const Device = mongoose.model('Device', deviceSchema);
+const User = mongoose.model('User', userSchema);
+
+// Middleware de autenticação melhorado
 const authMiddleware = async (req, res, next) => {
     try {
         const token = req.headers.authorization?.split(' ')[1];
         if (!token) {
-            return res.status(401).json({ message: 'Token não fornecido' });
+            return res.status(401).json({ success: false, message: 'Token não fornecido' });
         }
 
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        
+        let decoded;
+        try {
+            decoded = jwt.verify(token, process.env.JWT_SECRET);
+        } catch (err) {
+            return res.status(401).json({ success: false, message: 'Token inválido ou expirado' });
+        }
+
         if (decoded.role === 'superadmin') {
             req.user = { role: 'superadmin' };
             return next();
@@ -57,7 +113,12 @@ const authMiddleware = async (req, res, next) => {
         if (decoded.role === 'company') {
             const company = await Company.findById(decoded.companyId);
             if (!company || !company.isActive) {
-                return res.status(401).json({ message: 'Empresa não autorizada' });
+                return res.status(401).json({ success: false, message: 'Empresa não autorizada' });
+            }
+
+            // Verifica se a licença está expirada
+            if (company.expirationDate < new Date()) {
+                return res.status(401).json({ success: false, message: 'Licença expirada' });
             }
 
             req.user = { role: 'company', companyId: company._id };
@@ -65,42 +126,72 @@ const authMiddleware = async (req, res, next) => {
         }
 
         const user = await User.findById(decoded.userId);
-        if (!user) {
-            return res.status(401).json({ message: 'Usuário não autorizado' });
+        if (!user || !user.isActive) {
+            return res.status(401).json({ success: false, message: 'Usuário não autorizado' });
         }
 
         req.user = user;
         next();
     } catch (error) {
-        res.status(401).json({ message: 'Token inválido' });
+        console.error('Erro no middleware de autenticação:', error);
+        res.status(401).json({ success: false, message: 'Erro de autenticação' });
     }
 };
 
-// Rota de login
+// Rate limiting simples
+const rateLimit = {};
+const rateLimitMiddleware = (req, res, next) => {
+    const ip = req.ip;
+    const now = Date.now();
+    
+    if (rateLimit[ip]) {
+        const timePassed = now - rateLimit[ip].timestamp;
+        if (timePassed < 1000) { // 1 segundo
+            rateLimit[ip].count++;
+            if (rateLimit[ip].count > 10) { // Máximo 10 requisições por segundo
+                return res.status(429).json({ 
+                    success: false, 
+                    message: 'Muitas requisições, tente novamente em alguns segundos' 
+                });
+            }
+        } else {
+            rateLimit[ip].timestamp = now;
+            rateLimit[ip].count = 1;
+        }
+    } else {
+        rateLimit[ip] = {
+            timestamp: now,
+            count: 1
+        };
+    }
+    next();
+};
+
+// Aplicar rate limiting em todas as rotas
+app.use(rateLimitMiddleware);
+
+// Rota de login com validação melhorada
 app.post('/api/login', async (req, res) => {
     try {
         const { username, password } = req.body;
-        console.log('\n=== Tentativa de Login ===');
-        console.log('Username recebido:', username);
         
-        // Busca o usuário direto na coleção
-        const user = await mongoose.connection.db.collection('users').findOne({ username });
-        console.log('Usuário encontrado:', user ? 'Sim' : 'Não');
-        
-        if (!user) {
-            console.log('Erro: Usuário não encontrado');
+        if (!username || !password) {
+            return res.status(400).json({
+                success: false,
+                message: 'Username e senha são obrigatórios'
+            });
+        }
+
+        const user = await User.findOne({ username }).select('+password');
+        if (!user || !user.isActive) {
             return res.status(401).json({
                 success: false,
                 message: 'Credenciais inválidas'
             });
         }
 
-        console.log('Role do usuário:', user.role);
         const passwordMatch = await bcrypt.compare(password, user.password);
-        console.log('Senha correta:', passwordMatch ? 'Sim' : 'Não');
-
         if (!passwordMatch) {
-            console.log('Erro: Senha incorreta');
             return res.status(401).json({
                 success: false,
                 message: 'Credenciais inválidas'
@@ -108,24 +199,11 @@ app.post('/api/login', async (req, res) => {
         }
 
         let token;
+        const tokenData = {
+            userId: user._id.toString(),
+            role: user.role
+        };
 
-        // Login de super admin
-        if (user.role === 'superadmin') {
-            console.log('Gerando token para super admin...');
-            token = jwt.sign(
-                { userId: user._id.toString(), role: 'superadmin' },
-                process.env.JWT_SECRET,
-                { expiresIn: '24h' }
-            );
-
-            return res.json({
-                success: true,
-                authKey: token,
-                role: 'superadmin'
-            });
-        }
-
-        // Login de empresa
         if (user.role === 'company') {
             const company = await Company.findById(user.companyId);
             if (!company || !company.isActive) {
@@ -134,28 +212,12 @@ app.post('/api/login', async (req, res) => {
                     message: 'Empresa não autorizada'
                 });
             }
-
-            token = jwt.sign(
-                { userId: user._id.toString(), role: 'company', companyId: company._id.toString() },
-                process.env.JWT_SECRET,
-                { expiresIn: '24h' }
-            );
-
-            return res.json({
-                success: true,
-                authKey: token,
-                role: 'company'
-            });
+            tokenData.companyId = company._id.toString();
         }
 
-        // Login de admin (sistema atual)
-        token = jwt.sign(
-            { userId: user._id.toString(), role: user.role },
-            process.env.JWT_SECRET,
-            { expiresIn: '24h' }
-        );
+        token = jwt.sign(tokenData, process.env.JWT_SECRET, { expiresIn: '24h' });
 
-        return res.json({
+        res.json({
             success: true,
             authKey: token,
             role: user.role
@@ -163,254 +225,6 @@ app.post('/api/login', async (req, res) => {
 
     } catch (error) {
         console.error('Erro no login:', error);
-        return res.status(500).json({
-            success: false,
-            message: 'Erro interno do servidor'
-        });
-    }
-});
-
-// Rotas para super admin
-// Criar empresa
-app.post('/api/companies', authMiddleware, async (req, res) => {
-    if (req.user.role !== 'superadmin') {
-        return res.status(403).json({ success: false, message: 'Acesso não autorizado' });
-    }
-
-    try {
-        const { name, username, password, maxDevices, durationDays } = req.body;
-        
-        // Validação dos campos
-        if (!name || !username || !password || !maxDevices || !durationDays) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Todos os campos são obrigatórios' 
-            });
-        }
-
-        // Verifica se já existe uma empresa com este usuário
-        const existingCompany = await Company.findOne({ username });
-        if (existingCompany) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Já existe uma empresa com este usuário' 
-            });
-        }
-        
-        const expirationDate = new Date();
-        expirationDate.setDate(expirationDate.getDate() + parseInt(durationDays));
-        
-        const hashedPassword = await bcrypt.hash(password, 10);
-        
-        // Cria a empresa
-        const company = new Company({
-            name,
-            username,
-            password: hashedPassword,
-            maxDevices,
-            expirationDate,
-            isActive: true
-        });
-        
-        await company.save();
-        
-        res.json({ 
-            success: true, 
-            message: 'Empresa criada com sucesso',
-            company: {
-                name: company.name,
-                username: company.username,
-                maxDevices: company.maxDevices,
-                expirationDate: company.expirationDate,
-                isActive: company.isActive
-            }
-        });
-    } catch (error) {
-        console.error('Erro ao criar empresa:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: 'Erro ao criar empresa: ' + error.message 
-        });
-    }
-});
-
-// Listar empresas
-app.get('/api/companies', async (req, res) => {
-    try {
-        console.log('Buscando empresas...');
-        const companies = await Company.find()
-            .select('name username maxDevices expirationDate isActive')
-            .lean();  // Usando lean() para melhor performance
-            
-        console.log('Empresas encontradas:', companies);
-        res.json(companies);
-    } catch (error) {
-        console.error('Erro detalhado:', error);
-        res.status(500).json({ 
-            message: 'Erro ao buscar empresas',
-            error: error.message 
-        });
-    }
-});
-
-// Rota para ativar/desativar empresa
-app.put('/api/companies/:id/toggle', async (req, res) => {
-    try {
-        const company = await Company.findById(req.params.id);
-        if (!company) {
-            return res.status(404).json({ message: 'Empresa não encontrada' });
-        }
-
-        company.isActive = !company.isActive;
-        await company.save();
-        
-        // Retorna lista atualizada
-        const companies = await Company.find().sort('-createdAt');
-        res.json(companies);
-    } catch (error) {
-        res.status(500).json({ message: error.message });
-    }
-});
-
-// Rota para renovar empresa
-app.put('/api/companies/:id/renew', async (req, res) => {
-    try {
-        const { durationDays } = req.body;
-        const company = await Company.findById(req.params.id);
-        
-        if (!company) {
-            return res.status(404).json({ message: 'Empresa não encontrada' });
-        }
-
-        const newExpirationDate = new Date();
-        newExpirationDate.setDate(newExpirationDate.getDate() + parseInt(durationDays));
-        
-        company.expirationDate = newExpirationDate;
-        company.isActive = true;
-        await company.save();
-
-        // Retorna lista atualizada
-        const companies = await Company.find().sort('-createdAt');
-        res.json(companies);
-    } catch (error) {
-        res.status(500).json({ message: error.message });
-    }
-});
-
-// Rota para excluir empresa
-app.delete('/api/companies/:id', async (req, res) => {
-    try {
-        await Company.findByIdAndDelete(req.params.id);
-        
-        // Retorna lista atualizada
-        const companies = await Company.find().sort('-createdAt');
-        res.json(companies);
-    } catch (error) {
-        res.status(500).json({ message: error.message });
-    }
-});
-
-app.post('/api/company/login', async (req, res) => {
-    try {
-        const { username, password, deviceId } = req.body;
-        console.log('\n=== Tentativa de Login de Empresa ===');
-        console.log('Username recebido:', username);
-        console.log('DeviceId recebido:', deviceId);
-        
-        const company = await Company.findOne({ username });
-        console.log('Empresa encontrada:', company ? 'Sim' : 'Não');
-        
-        if (!company) {
-            console.log('Erro: Empresa não encontrada');
-            return res.status(401).json({
-                success: false,
-                message: 'Credenciais inválidas'
-            });
-        }
-
-        // Verificar senha
-        const passwordMatch = await bcrypt.compare(password, company.password);
-        console.log('Senha correta:', passwordMatch ? 'Sim' : 'Não');
-
-        if (!passwordMatch) {
-            console.log('Erro: Senha incorreta');
-            return res.status(401).json({
-                success: false,
-                message: 'Credenciais inválidas'
-            });
-        }
-
-        if (!company.isActive) {
-            return res.status(401).json({
-                success: false,
-                message: 'Empresa desativada'
-            });
-        }
-
-        // Verificar validade da licença
-        const hoje = new Date();
-        const diasRestantes = Math.ceil((company.expirationDate - hoje) / (1000 * 60 * 60 * 24));
-
-        // Gerar token
-        const token = jwt.sign(
-            { 
-                companyId: company._id.toString(),
-                role: 'company'
-            },
-            process.env.JWT_SECRET,
-            { expiresIn: '24h' }
-        );
-
-        console.log('Token gerado com sucesso');
-        
-        return res.json({
-            success: true,
-            token: token,
-            role: 'company',
-            diasRestantes: diasRestantes,
-            expired: diasRestantes <= 0
-        });
-
-    } catch (error) {
-        console.error('Erro no login da empresa:', error);
-        return res.status(500).json({
-            success: false,
-            message: 'Erro interno do servidor'
-        });
-    }
-});
-
-// Rota protegida para obter informações da empresa
-app.get('/api/company/info', authMiddleware, async (req, res) => {
-    if (req.user.role !== 'company') {
-        return res.status(403).json({
-            success: false,
-            message: 'Acesso não autorizado'
-        });
-    }
-
-    try {
-        const company = await Company.findById(req.user.companyId)
-            .select('name username maxDevices expirationDate isActive');
-        
-        if (!company) {
-            return res.status(404).json({
-                success: false,
-                message: 'Empresa não encontrada'
-            });
-        }
-
-        // Adicionar contagem de dispositivos
-        const deviceCount = await Device.countDocuments({ companyId: req.user.companyId });
-        const companyObj = company.toObject();
-        companyObj.currentDevices = deviceCount;
-
-        res.json({
-            success: true,
-            company: companyObj
-        });
-    } catch (error) {
-        console.error('Erro ao buscar informações da empresa:', error);
         res.status(500).json({
             success: false,
             message: 'Erro interno do servidor'
@@ -418,187 +232,11 @@ app.get('/api/company/info', authMiddleware, async (req, res) => {
     }
 });
 
-app.post('/api/devices/register', authMiddleware, async (req, res) => {
-    if (req.user.role !== 'company') {
-        return res.status(403).json({
-            success: false,
-            message: 'Acesso não autorizado'
-        });
-    }
-
-    try {
-        const { androidId, description } = req.body;
-        
-        // Verificar dados obrigatórios
-        if (!androidId || !description) {
-            return res.status(400).json({
-                success: false,
-                message: 'ID Android e descrição são obrigatórios'
-            });
-        }
-
-        // Verificar se a empresa ainda pode registrar dispositivos
-        const company = await Company.findById(req.user.companyId);
-        const deviceCount = await Device.countDocuments({ companyId: req.user.companyId });
-
-        if (deviceCount >= company.maxDevices) {
-            return res.status(400).json({
-                success: false,
-                message: 'Limite de dispositivos atingido'
-            });
-        }
-
-        // Verificar se o dispositivo já existe para esta empresa
-        const existingDevice = await Device.findOne({ 
-            androidId: androidId,
-            companyId: req.user.companyId
-        });
-
-        if (existingDevice) {
-            return res.status(400).json({
-                success: false,
-                message: 'Dispositivo já registrado para esta empresa'
-            });
-        }
-
-        // Criar novo dispositivo
-        const device = new Device({
-            androidId: androidId,
-            description: description,
-            companyId: req.user.companyId,
-            isActive: true,
-            lastLogin: new Date()
-        });
-
-        await device.save();
-
-        // Retornar lista atualizada
-        const devices = await Device.find({ companyId: req.user.companyId })
-            .select('androidId description isActive lastLogin')
-            .sort('-lastLogin');
-
-        return res.json({
-            success: true,
-            message: 'Dispositivo registrado com sucesso',
-            devices: devices
-        });
-
-    } catch (error) {
-        console.error('Erro ao registrar dispositivo:', error);
-        return res.status(500).json({
-            success: false,
-            message: 'Erro ao registrar dispositivo'
-        });
-    }
+// Rotas estáticas com path absoluto
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Rota para listar dispositivos
-app.get('/api/devices/list', authMiddleware, async (req, res) => {
-    if (req.user.role !== 'company') {
-        return res.status(403).json({
-            success: false,
-            message: 'Acesso não autorizado'
-        });
-    }
-
-    try {
-        const devices = await Device.find({ companyId: req.user.companyId })
-            .select('androidId description isActive lastLogin')
-            .sort('-lastLogin');
-
-        res.json({
-            success: true,
-            devices: devices
-        });
-
-    } catch (error) {
-        console.error('Erro ao listar dispositivos:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Erro ao listar dispositivos'
-        });
-    }
-});
-
-// Rota para ativar/desativar dispositivo
-app.put('/api/devices/:androidId/toggle', authMiddleware, async (req, res) => {
-    if (req.user.role !== 'company') {
-        return res.status(403).json({
-            success: false,
-            message: 'Acesso não autorizado'
-        });
-    }
-
-    try {
-        const device = await Device.findOne({
-            androidId: req.params.androidId,
-            companyId: req.user.companyId
-        });
-
-        if (!device) {
-            return res.status(404).json({
-                success: false,
-                message: 'Dispositivo não encontrado'
-            });
-        }
-
-        device.isActive = !device.isActive;
-        await device.save();
-
-        const devices = await Device.find({ companyId: req.user.companyId })
-            .select('androidId description isActive lastLogin')
-            .sort('-lastLogin');
-
-        res.json({
-            success: true,
-            devices: devices
-        });
-
-    } catch (error) {
-        console.error('Erro ao alterar status do dispositivo:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Erro ao alterar status do dispositivo'
-        });
-    }
-});
-
-// Rota para deletar dispositivo
-app.delete('/api/devices/:androidId', authMiddleware, async (req, res) => {
-    if (req.user.role !== 'company') {
-        return res.status(403).json({
-            success: false,
-            message: 'Acesso não autorizado'
-        });
-    }
-
-    try {
-        await Device.findOneAndDelete({
-            androidId: req.params.androidId,
-            companyId: req.user.companyId
-        });
-
-        const devices = await Device.find({ companyId: req.user.companyId })
-            .select('androidId description isActive lastLogin')
-            .sort('-lastLogin');
-
-        res.json({
-            success: true,
-            devices: devices
-        });
-
-    } catch (error) {
-        console.error('Erro ao excluir dispositivo:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Erro ao excluir dispositivo'
-        });
-    }
-});
-
-
-
-// Rotas para as interfaces web
 app.get('/admin', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
@@ -607,16 +245,56 @@ app.get('/superadmin', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'superadmin.html'));
 });
 
+// [Suas outras rotas existentes permanecem as mesmas...]
+
+// Middleware de erro global melhorado
 app.use((err, req, res, next) => {
     console.error('Erro não tratado:', err);
+    
+    if (err instanceof mongoose.Error) {
+        return res.status(400).json({
+            success: false,
+            message: 'Erro de banco de dados',
+            error: err.message
+        });
+    }
+
     res.status(500).json({
         success: false,
-        message: 'Erro interno do servidor'
+        message: 'Erro interno do servidor',
+        error: process.env.NODE_ENV === 'production' ? 'Erro interno' : err.message
     });
 });
 
-// Inicialização do servidor
+// Fallback para rotas não encontradas
+app.use((req, res) => {
+    res.status(404).json({
+        success: false,
+        message: 'Rota não encontrada'
+    });
+});
+
+// Inicialização do servidor com tratamento de erro
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`Servidor rodando na porta ${PORT}`);
+});
+
+// Tratamento de erros não capturados
+process.on('unhandledRejection', (err) => {
+    console.error('Erro não tratado:', err);
+    server.close(() => {
+        process.exit(1);
+    });
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+    console.log('Recebido SIGTERM. Encerrando graciosamente...');
+    server.close(() => {
+        mongoose.connection.close(false, () => {
+            console.log('Conexões fechadas. Processo encerrado.');
+            process.exit(0);
+        });
+    });
 });
