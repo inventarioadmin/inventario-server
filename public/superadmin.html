@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Painel Super Admin</title>
+    <meta charset="UTF-8">
+    <style>
+        body { 
+            font-family: Arial; 
+            margin: 20px; 
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .hidden {
+            display: none;
+        }
+        input, button {
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        .btn-danger {
+            background: #dc3545;
+        }
+        .btn-danger:hover {
+            background: #c82333;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px 8px;
+            text-align: left;
+        }
+        th {
+            background: #f8f9fa;
+        }
+        .card {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .status-active {
+            color: green;
+        }
+        .status-inactive {
+            color: red;
+        }
+        .status-warning {
+            color: orange;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Área de Login -->
+        <div id="loginArea">
+            <h1>Painel Super Admin</h1>
+            <div>
+                <input type="text" id="username" placeholder="Usuário">
+                <input type="password" id="password" placeholder="Senha">
+                <button onclick="login()">Entrar</button>
+            </div>
+        </div>
+
+        <!-- Área de Gerenciamento -->
+        <div id="managementArea" class="hidden">
+            <h1>Gerenciamento de Empresas</h1>
+            
+            <div class="card">
+                <h2>Adicionar Nova Empresa</h2>
+                <div>
+                    <input type="text" id="companyName" placeholder="Nome da Empresa" style="width: 200px;">
+                    <input type="text" id="companyUsername" placeholder="Usuário" style="width: 150px;">
+                    <input type="password" id="companyPassword" placeholder="Senha" style="width: 150px;">
+                    <input type="number" id="maxDevices" placeholder="Limite de Dispositivos" style="width: 150px;">
+                    <input type="number" id="duration" placeholder="Duração em dias" value="30" style="width: 120px;">
+                    <button onclick="addCompany()">Adicionar Empresa</button>
+                </div>
+            </div>
+
+            <h2>Empresas Cadastradas</h2>
+            <table id="companiesTable">
+                <thead>
+                    <tr>
+                        <th>Nome</th>
+                        <th>Usuário</th>
+                        <th>Status</th>
+                        <th>Dispositivos</th>
+                        <th>Expira em</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody id="companyList"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let authToken = '';
+
+        async function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: username,
+                        password: password
+                    })
+                });
+
+                const data = await response.json();
+                if (data.success && data.role === 'superadmin') {
+                    authToken = data.authKey;
+                    document.getElementById('loginArea').classList.add('hidden');
+                    document.getElementById('managementArea').classList.remove('hidden');
+                    loadCompanies();
+                } else {
+                    alert('Login falhou: ' + (data.message || 'Credenciais inválidas'));
+                }
+            } catch (error) {
+                alert('Erro ao fazer login: ' + error.message);
+            }
+        }
+
+// Função para recarregar a tabela
+function reloadTable(companies) {
+    const tableBody = document.getElementById('companyList');
+    tableBody.innerHTML = '';
+    
+    companies.forEach(company => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${company.name}</td>
+            <td>${company.username}</td>
+            <td>${company.isActive ? 'Ativo' : 'Inativo'}</td>
+            <td>${company.maxDevices}</td>
+            <td>${new Date(company.expirationDate).toLocaleDateString()}</td>
+            <td>
+                <button onclick="toggleCompany('${company._id}')" class="status-btn">
+                    ${company.isActive ? 'Desativar' : 'Ativar'}
+                </button>
+                <button onclick="renewCompany('${company._id}')" class="renew-btn">Renovar</button>
+                <button onclick="deleteCompany('${company._id}')" class="delete-btn">Excluir</button>
+            </td>
+        `;
+        tableBody.appendChild(row);
+    });
+}
+
+// Função para carregar empresas
+function loadCompanies() {
+    fetch('/api/companies')
+        .then(response => response.json())
+        .then(companies => {
+            reloadTable(companies);
+        })
+        .catch(error => {
+            console.error('Erro ao carregar empresas:', error);
+            const tableBody = document.getElementById('companyList');
+            tableBody.innerHTML = `<tr><td colspan="6">Erro ao carregar empresas</td></tr>`;
+        });
+}
+
+// Função para ativar/desativar empresa
+async function toggleCompany(id) {
+    if (!confirm('Deseja realmente alterar o status desta empresa?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/companies/${id}/toggle`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const data = await response.json();
+        reloadTable(data); // Atualiza a tabela com os dados retornados
+        alert('Status alterado com sucesso!');
+    } catch (error) {
+        alert('Erro ao alterar status');
+    }
+}
+
+// Função para renovar empresa
+async function renewCompany(id) {
+    const dias = prompt('Por quantos dias deseja renovar?', '30');
+    if (!dias) return;
+
+    try {
+        const response = await fetch(`/api/companies/${id}/renew`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ durationDays: parseInt(dias) })
+        });
+
+        const data = await response.json();
+        reloadTable(data); // Atualiza a tabela com os dados retornados
+        alert('Empresa renovada com sucesso!');
+    } catch (error) {
+        alert('Erro ao renovar empresa');
+    }
+}
+
+// Função para excluir empresa
+async function deleteCompany(id) {
+    if (!confirm('Tem certeza que deseja excluir esta empresa? Esta ação não pode ser desfeita.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/companies/${id}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const data = await response.json();
+        reloadTable(data); // Atualiza a tabela com os dados retornados
+        alert('Empresa excluída com sucesso!');
+    } catch (error) {
+        alert('Erro ao excluir empresa');
+    }
+}
+
+// Função de carregar empresas atualizada
+function loadCompanies() {
+    fetch('/api/companies')
+        .then(response => response.json())
+        .then(companies => {
+            const tableBody = document.getElementById('companyList');
+            if (!tableBody) {
+                console.error('Elemento companyList não encontrado');
+                return;
+            }
+            
+            // Limpa a tabela atual
+            tableBody.innerHTML = '';
+            
+            // Adiciona as empresas
+            companies.forEach(company => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${company.name || '-'}</td>
+                    <td>${company.username || '-'}</td>
+                    <td>${company.isActive ? 'Ativo' : 'Inativo'}</td>
+                    <td>${company.maxDevices || 0}</td>
+                    <td>${company.expirationDate ? new Date(company.expirationDate).toLocaleDateString() : '-'}</td>
+                    <td>
+                        <button onclick="toggleCompany('${company._id}')" class="status-btn">
+                            ${company.isActive ? 'Desativar' : 'Ativar'}
+                        </button>
+                        <button onclick="renewCompany('${company._id}')" class="renew-btn">Renovar</button>
+                        <button onclick="deleteCompany('${company._id}')" class="delete-btn">Excluir</button>
+                    </td>
+                `;
+                tableBody.appendChild(row);
+            });
+        })
+        .catch(error => {
+            console.error('Erro ao carregar empresas:', error);
+            const tableBody = document.getElementById('companyList');
+            if (tableBody) {
+                tableBody.innerHTML = `<tr><td colspan="6">Erro ao carregar empresas: ${error.message}</td></tr>`;
+            }
+        });
+}
+
+        async function addCompany() {
+            const name = document.getElementById('companyName').value;
+            const username = document.getElementById('companyUsername').value;
+            const password = document.getElementById('companyPassword').value;
+            const maxDevices = parseInt(document.getElementById('maxDevices').value);
+            const duration = parseInt(document.getElementById('duration').value);
+
+            if (!name || !username || !password || !maxDevices || !duration) {
+                alert('Preencha todos os campos');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/companies', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: JSON.stringify({
+                        name,
+                        username,
+                        password,
+                        maxDevices,
+                        durationDays: duration
+                    })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    document.getElementById('companyName').value = '';
+                    document.getElementById('companyUsername').value = '';
+                    document.getElementById('companyPassword').value = '';
+                    document.getElementById('maxDevices').value = '';
+                    document.getElementById('duration').value = '30';
+                    loadCompanies();
+                    alert('Empresa adicionada com sucesso!');
+                } else {
+                    throw new Error(data.message || 'Erro ao adicionar empresa');
+                }
+            } catch (error) {
+                alert(error.message || 'Erro ao adicionar empresa');
+            }
+        }
+
+        async function toggleCompany(id) {
+            if (!confirm('Tem certeza que deseja alterar o status desta empresa?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/companies/${id}/toggle`, {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    loadCompanies();
+                } else {
+                    throw new Error(data.message || 'Erro ao alterar status da empresa');
+                }
+            } catch (error) {
+                alert(error.message);
+            }
+        }
+
+        async function renewCompany(id) {
+            const days = prompt('Por quantos dias deseja renovar?', '30');
+            if (!days) return;
+
+            try {
+                const response = await fetch(`/api/companies/${id}/renew`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: JSON.stringify({ durationDays: parseInt(days) })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    loadCompanies();
+                    alert('Empresa renovada com sucesso!');
+                } else {
+                    throw new Error(data.message || 'Erro ao renovar empresa');
+                }
+            } catch (error) {
+                alert(error.message);
+            }
+        }
+
+        async function deleteCompany(id) {
+            if (!confirm('Tem certeza que deseja excluir esta empresa? Esta ação não pode ser desfeita.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/companies/${id}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    loadCompanies();
+                    alert('Empresa excluída com sucesso!');
+                } else {
+                    throw new Error(data.message || 'Erro ao excluir empresa');
+                }
+            } catch (error) {
+                alert(error.message);
+            }
+        }
+    </script>
+</body>
+</html>
