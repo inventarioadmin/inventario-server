@@ -170,27 +170,56 @@ const rateLimitMiddleware = (req, res, next) => {
 // Aplicar rate limiting em todas as rotas
 app.use(rateLimitMiddleware);
 
-// Rota de login com validação melhorada
+// Rota de login melhorada com mais logs
 app.post('/api/login', async (req, res) => {
     try {
         const { username, password } = req.body;
+        console.log('\n=== Tentativa de Login ===');
+        console.log('Username:', username);
         
         if (!username || !password) {
+            console.log('Erro: Username ou senha não fornecidos');
             return res.status(400).json({
                 success: false,
                 message: 'Username e senha são obrigatórios'
             });
         }
 
-        const user = await User.findOne({ username }).select('+password');
-        if (!user || !user.isActive) {
+        // Busca o usuário em todas as coleções
+        let user = await User.findOne({ username }).select('+password');
+        let isCompanyLogin = false;
+
+        if (!user) {
+            // Se não encontrou na coleção users, procura na coleção companies
+            const company = await Company.findOne({ username });
+            if (company) {
+                user = company;
+                isCompanyLogin = true;
+            }
+        }
+
+        console.log('Usuário encontrado:', user ? 'Sim' : 'Não');
+        console.log('Tipo de login:', isCompanyLogin ? 'Company' : 'User');
+
+        if (!user) {
             return res.status(401).json({
                 success: false,
                 message: 'Credenciais inválidas'
             });
         }
 
+        // Verifica se o usuário está ativo
+        if (!user.isActive) {
+            console.log('Erro: Usuário inativo');
+            return res.status(401).json({
+                success: false,
+                message: 'Usuário inativo'
+            });
+        }
+
         const passwordMatch = await bcrypt.compare(password, user.password);
+        console.log('Senha correta:', passwordMatch ? 'Sim' : 'Não');
+
         if (!passwordMatch) {
             return res.status(401).json({
                 success: false,
@@ -198,29 +227,22 @@ app.post('/api/login', async (req, res) => {
             });
         }
 
-        let token;
-        const tokenData = {
+        let tokenData = {
             userId: user._id.toString(),
-            role: user.role
+            role: isCompanyLogin ? 'company' : user.role
         };
 
-        if (user.role === 'company') {
-            const company = await Company.findById(user.companyId);
-            if (!company || !company.isActive) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Empresa não autorizada'
-                });
-            }
-            tokenData.companyId = company._id.toString();
+        if (isCompanyLogin) {
+            tokenData.companyId = user._id.toString();
         }
 
-        token = jwt.sign(tokenData, process.env.JWT_SECRET, { expiresIn: '24h' });
+        const token = jwt.sign(tokenData, process.env.JWT_SECRET, { expiresIn: '24h' });
+        console.log('Token gerado com sucesso');
 
         res.json({
             success: true,
             authKey: token,
-            role: user.role
+            role: isCompanyLogin ? 'company' : user.role
         });
 
     } catch (error) {
