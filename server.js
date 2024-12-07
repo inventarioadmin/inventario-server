@@ -13,13 +13,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// Rota raiz
-app.get('/', (req, res) => {
-    res.json({
-        status: 'online',
-        message: 'Inventario Server v1.0'
-    });
-});
+
 
 // Conexão MongoDB
 const mongoURI = process.env.MONGODB_URI.includes('/?') 
