@@ -1,60 +1,68 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const Company = require('./models/Company');
+const Device = require('./models/Device');
 
-const mongoURI = process.env.MONGODB_URI.includes('/?') 
-    ? process.env.MONGODB_URI.replace('/?', '/inventario?')
-    : process.env.MONGODB_URI;
+// Schema do User
+const userSchema = new mongoose.Schema({
+    username: { type: String, required: true, unique: true },
+    password: { type: String, required: true },
+    role: { type: String, enum: ['superadmin', 'admin'], required: true },
+    companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company' },
+    isActive: { type: Boolean, default: true }
+}, { timestamps: true });
 
-const User = mongoose.model('User', {
-    username: String,
-    password: String,
-    role: String,
-    isActive: Boolean
-});
+const User = mongoose.model('User', userSchema);
 
-async function createSuperAdmin() {
+async function initialize() {
     try {
-        console.log('Conectando ao MongoDB...');
-        console.log('URI:', mongoURI.replace(/:[^:/@]+@/, ':****@')); // Oculta a senha no log
-        
-        await mongoose.connect(mongoURI);
-        console.log('Conectado com sucesso!');
+        // Conecta ao MongoDB
+        await mongoose.connect(process.env.MONGODB_URI);
+        console.log('Conectado ao MongoDB');
 
-        // Define credenciais do super admin
-        const username = 'GreenSys';
-        const password = 'PlanADM042072@';
+        // Verifica se já existe um superadmin
+        const existingSuperAdmin = await User.findOne({ role: 'superadmin' });
+        if (existingSuperAdmin) {
+            console.log('Superadmin já existe!');
+            console.log('Username:', existingSuperAdmin.username);
+            return;
+        }
 
-        // Remove super admin existente (se houver)
-        await User.deleteOne({ role: 'superadmin' });
-        console.log('Removido super admin antigo (se existia)');
+        // Cria senha hash
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(process.env.SUPERADMIN_PASSWORD || 'admin123', salt);
 
-        // Cria hash da senha
-        const hashedPassword = await bcrypt.hash(password, 10);
-        
-        // Cria novo super admin
-        const user = new User({
-            username: username,
+        // Cria superadmin
+        const superAdmin = new User({
+            username: process.env.SUPERADMIN_USERNAME || 'superadmin',
             password: hashedPassword,
             role: 'superadmin',
             isActive: true
         });
 
-        await user.save();
-        console.log('\n=== Super Admin criado com sucesso! ===');
-        console.log('Username:', username);
-        console.log('Senha:', password);
-        console.log('Role: Super Admin');
-        console.log('Status: Ativo');
-        console.log('====================================\n');
+        await superAdmin.save();
+        console.log('Superadmin criado com sucesso!');
+        console.log('Username:', superAdmin.username);
+        console.log('Senha:', process.env.SUPERADMIN_PASSWORD || 'admin123');
+
+        // Limpa dados de teste se estiver em ambiente de desenvolvimento
+        if (process.env.NODE_ENV === 'development') {
+            // Remove todos os dados exceto o superadmin
+            await Company.deleteMany({});
+            await Device.deleteMany({});
+            await User.deleteMany({ role: { $ne: 'superadmin' } });
+            
+            console.log('Dados de teste limpos com sucesso!');
+        }
 
     } catch (error) {
-        console.error('Erro:', error);
+        console.error('Erro durante a inicialização:', error);
     } finally {
-        await mongoose.connection.close();
-        console.log('Conexão fechada');
-        process.exit(0);
+        await mongoose.disconnect();
+        console.log('Desconectado do MongoDB');
     }
 }
 
-createSuperAdmin();
+// Executa o script
+initialize();
