@@ -291,39 +291,71 @@
             }, 1000);
         }
     
-        async function login() {
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
-    
-            try {
-                const response = await fetch('/api/login', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ username, password })
-                });
-    
-                const data = await response.json();
-                
-                if (data.success && data.role === 'superadmin') {
-                    localStorage.setItem('authToken', data.token);
-                    checkAuth();
-                } else {
-                    throw new Error(data.message || 'Acesso não autorizado');
-                }
-            } catch (error) {
-                alert(error.message || 'Erro ao fazer login');
-            }
+// Função de login atualizada para o frontend
+async function login() {
+    const username = document.getElementById('username').value;
+    const password = document.getElementById('password').value;
+
+    try {
+        const response = await fetch('/api/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ 
+                username, 
+                password,
+                type: 'superadmin'  // Sempre incluindo o type
+            })
+        });
+
+        const data = await response.json();
+        
+        if (data.success && data.token) {
+            localStorage.setItem('authToken', data.token);
+            localStorage.setItem('userRole', data.role); // Salva o role também
+            window.location.href = '/superadmin';
+        } else {
+            throw new Error(data.message || 'Credenciais inválidas');
         }
-    
-        function logout() {
-            localStorage.removeItem('authToken');
-            if (sessionInterval) {
-                clearInterval(sessionInterval);
-            }
-            showLoginArea();
+    } catch (error) {
+        console.error('Erro no login:', error);
+        alert(error.message || 'Erro ao fazer login');
+    }
+}
+
+// Função para verificar autenticação
+function checkAuth() {
+    const token = localStorage.getItem('authToken');
+    if (!token) {
+        showLoginArea();
+        return;
+    }
+
+    try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        if (payload.exp * 1000 < Date.now()) {
+            logout();
+            return;
         }
+        tokenExpiration = payload.exp * 1000;
+        showManagementArea();
+        startSessionTimer();
+    } catch (error) {
+        console.error('Erro ao verificar token:', error);
+        logout();
+    }
+}
+
+// Função de logout
+function logout() {
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('userRole');
+    if (sessionInterval) {
+        clearInterval(sessionInterval);
+    }
+    window.location.href = '/';
+}
     
         // Funções de gerenciamento de empresas
         async function loadCompanies() {

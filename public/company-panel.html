@@ -73,24 +73,33 @@
     </div>
 
     <script>
-        // Função para carregar informações da empresa
-        async function loadCompanyInfo() {
-            const token = localStorage.getItem('token');
+        // Verificação inicial de autenticação
+        function checkAuth() {
+            const token = localStorage.getItem('authToken');
             if (!token) {
                 window.location.href = '/';
-                return;
+                return false;
             }
+            return true;
+        }
+
+        // Função para carregar informações da empresa
+        async function loadCompanyInfo() {
+            if (!checkAuth()) return;
 
             try {
                 const response = await fetch('/api/company/info', {
                     headers: {
-                        'Authorization': `Bearer ${token}`
+                        'Authorization': `Bearer ${localStorage.getItem('authToken')}`
                     }
                 });
 
-                const data = await response.json();
-                console.log('Company Info:', data); // Debug
+                if (response.status === 401) {
+                    logout();
+                    return;
+                }
 
+                const data = await response.json();
                 if (data.success) {
                     document.getElementById('deviceCount').textContent = data.company.currentDevices || '0';
                     document.getElementById('maxDevices').textContent = data.company.maxDevices || '0';
@@ -104,17 +113,21 @@
 
         // Função para carregar dispositivos
         async function loadDevices() {
-            const token = localStorage.getItem('token');
+            if (!checkAuth()) return;
+
             try {
-                const response = await fetch('/api/devices/list', {
+                const response = await fetch('/api/devices', {
                     headers: {
-                        'Authorization': `Bearer ${token}`
+                        'Authorization': `Bearer ${localStorage.getItem('authToken')}`
                     }
                 });
 
-                const data = await response.json();
-                console.log('Devices:', data); // Debug
+                if (response.status === 401) {
+                    logout();
+                    return;
+                }
 
+                const data = await response.json();
                 if (data.success && data.devices) {
                     const tbody = document.getElementById('deviceList');
                     tbody.innerHTML = data.devices.map(device => `
@@ -145,80 +158,67 @@
         // Registrar dispositivo
         document.getElementById('deviceForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+            if (!checkAuth()) return;
+
             const androidId = document.getElementById('androidId').value;
             const description = document.getElementById('description').value;
 
             try {
-                const response = await fetch('/api/devices/register', {
+                const response = await fetch('/api/devices', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        'Authorization': `Bearer ${localStorage.getItem('authToken')}`
                     },
                     body: JSON.stringify({ androidId, description })
                 });
 
-                console.log('Register response:', response.status); // Debug
                 const data = await response.json();
-                console.log('Register data:', data); // Debug
-
                 if (data.success) {
                     document.getElementById('deviceForm').reset();
-                    await Promise.all([
-                        loadCompanyInfo(),  // Recarrega info da empresa
-                        loadDevices()       // Recarrega lista de dispositivos
-                    ]);
+                    await Promise.all([loadCompanyInfo(), loadDevices()]);
                     alert('Dispositivo registrado com sucesso!');
                 } else {
                     throw new Error(data.message || 'Erro ao registrar dispositivo');
                 }
             } catch (error) {
-                console.error('Erro detalhado:', error);
                 alert(error.message || 'Erro ao registrar dispositivo');
             }
         });
 
         // Ativar/Desativar dispositivo
         async function toggleDevice(androidId) {
-            const token = localStorage.getItem('token');
+            if (!checkAuth()) return;
+
             try {
                 const response = await fetch(`/api/devices/${androidId}/toggle`, {
                     method: 'PUT',
                     headers: {
-                        'Authorization': `Bearer ${token}`
+                        'Authorization': `Bearer ${localStorage.getItem('authToken')}`
                     }
                 });
 
                 const data = await response.json();
                 if (data.success) {
-                    await Promise.all([
-                        loadCompanyInfo(),  // Recarrega info da empresa
-                        loadDevices()       // Recarrega lista de dispositivos
-                    ]);
+                    await Promise.all([loadCompanyInfo(), loadDevices()]);
                 } else {
                     alert(data.message || 'Erro ao alterar status do dispositivo');
                 }
             } catch (error) {
-                console.error('Erro:', error);
                 alert('Erro ao alterar status do dispositivo');
             }
         }
 
         function logout() {
-            localStorage.clear();
+            localStorage.removeItem('authToken');
             window.location.href = '/';
         }
 
         // Inicialização
-        document.addEventListener('DOMContentLoaded', async () => {
-            try {
-                await Promise.all([
-                    loadCompanyInfo(),
-                    loadDevices()
-                ]);
-            } catch (error) {
-                console.error('Erro na inicialização:', error);
+        document.addEventListener('DOMContentLoaded', () => {
+            if (checkAuth()) {
+                Promise.all([loadCompanyInfo(), loadDevices()])
+                    .catch(error => console.error('Erro na inicialização:', error));
             }
         });
     </script>
