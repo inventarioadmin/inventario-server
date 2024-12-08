@@ -1,13 +1,11 @@
+// models/Device.js
 const mongoose = require('mongoose');
 
 const deviceSchema = new mongoose.Schema({
     androidId: {
         type: String,
-        required: true
-    },
-    imei: {
-        type: String,
-        sparse: true  // Permite múltiplos documentos com valor null
+        required: true,
+        unique: true
     },
     description: {
         type: String,
@@ -24,11 +22,12 @@ const deviceSchema = new mongoose.Schema({
     },
     lastLogin: {
         type: Date,
-        default: Date.now
+        default: null
+    },
+    lastAccess: {
+        type: Date,
+        default: null
     }
-});
-
-// Criar índices compostos para evitar duplicatas por empresa
-deviceSchema.index({ androidId: 1, companyId: 1 }, { unique: true });
+}, { timestamps: true });
 
 module.exports = mongoose.model('Device', deviceSchema);

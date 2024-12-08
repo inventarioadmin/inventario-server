@@ -8,6 +8,10 @@
 </head>
 <body class="bg-light">
     <div class="container mt-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h3>Painel da Empresa</h3>
+            <button onclick="logout()" class="btn btn-danger">Sair</button>
+        </div>
         <div class="card shadow">
             <div class="card-body">
                 <!-- Info da Empresa -->
@@ -69,104 +73,78 @@
     </div>
 
     <script>
-        // Verifica token e redireciona se não estiver autenticado
-        function checkAuth() {
-            const token = localStorage.getItem('companyToken');
-            if (!token) {
-                localStorage.clear();
-                window.location.replace('/company-admin.html');
-                return false;
-            }
-            return true;
-        }
-
-        // Carregar informações da empresa
+        // Função para carregar informações da empresa
         async function loadCompanyInfo() {
-            if (!checkAuth()) return;
+            const token = localStorage.getItem('token');
+            if (!token) {
+                window.location.href = '/';
+                return;
+            }
 
             try {
                 const response = await fetch('/api/company/info', {
                     headers: {
-                        'Authorization': `Bearer ${localStorage.getItem('companyToken')}`
+                        'Authorization': `Bearer ${token}`
                     }
                 });
-                
-                const data = await response.json();
-                if (!data.success) {
-                    localStorage.clear();
-                    window.location.replace('/company-admin.html');
-                    return;
-                }
 
-                const company = data.company;
-                document.getElementById('maxDevices').textContent = company.maxDevices;
-                document.getElementById('deviceCount').textContent = company.currentDevices || 0;
-                
-                const expirationDate = new Date(company.expirationDate);
-                const daysRemaining = Math.ceil((expirationDate - new Date()) / (1000 * 60 * 60 * 24));
-                
-                document.getElementById('licenseExpiration').textContent = 
-                    `${expirationDate.toLocaleDateString()} (${daysRemaining} dias)`;
-                
-                if (daysRemaining <= 7) {
-                    document.getElementById('warningArea').innerHTML = `
-                        <div class="alert alert-warning mb-0">
-                            Licença expira em ${daysRemaining} dias!
-                        </div>
-                    `;
+                const data = await response.json();
+                console.log('Company Info:', data); // Debug
+
+                if (data.success) {
+                    document.getElementById('deviceCount').textContent = data.company.currentDevices || '0';
+                    document.getElementById('maxDevices').textContent = data.company.maxDevices || '0';
+                    document.getElementById('licenseExpiration').textContent = 
+                        data.company.expirationDate ? new Date(data.company.expirationDate).toLocaleDateString() : '-';
                 }
             } catch (error) {
-                console.error('Erro:', error);
-                localStorage.clear();
-                window.location.replace('/company-admin.html');
+                console.error('Erro ao carregar info:', error);
             }
         }
 
-        // Carregar dispositivos
+        // Função para carregar dispositivos
         async function loadDevices() {
-            if (!checkAuth()) return;
-
+            const token = localStorage.getItem('token');
             try {
                 const response = await fetch('/api/devices/list', {
                     headers: {
-                        'Authorization': `Bearer ${localStorage.getItem('companyToken')}`
+                        'Authorization': `Bearer ${token}`
                     }
                 });
-                
-                const data = await response.json();
-                if (!data.success) {
-                    throw new Error('Falha ao carregar dispositivos');
-                }
 
-                const tbody = document.getElementById('deviceList');
-                tbody.innerHTML = data.devices.map(device => `
-                    <tr>
-                        <td>${device.androidId}</td>
-                        <td>${device.description}</td>
-                        <td>
-                            <span class="badge ${device.isActive ? 'bg-success' : 'bg-danger'}">
-                                ${device.isActive ? 'Ativo' : 'Inativo'}
-                            </span>
-                        </td>
-                        <td>${device.lastLogin ? new Date(device.lastLogin).toLocaleString() : 'Nunca'}</td>
-                        <td>
-                            <button 
-                                onclick="toggleDevice('${device.androidId}')"
-                                class="btn btn-sm ${device.isActive ? 'btn-danger' : 'btn-success'}">
-                                ${device.isActive ? 'Desativar' : 'Ativar'}
-                            </button>
-                        </td>
-                    </tr>
-                `).join('');
+                const data = await response.json();
+                console.log('Devices:', data); // Debug
+
+                if (data.success && data.devices) {
+                    const tbody = document.getElementById('deviceList');
+                    tbody.innerHTML = data.devices.map(device => `
+                        <tr>
+                            <td>${device.androidId}</td>
+                            <td>${device.description}</td>
+                            <td>
+                                <span class="badge ${device.isActive ? 'bg-success' : 'bg-danger'}">
+                                    ${device.isActive ? 'Ativo' : 'Inativo'}
+                                </span>
+                            </td>
+                            <td>${device.lastAccess ? new Date(device.lastAccess).toLocaleString() : 'Nunca'}</td>
+                            <td>
+                                <button 
+                                    onclick="toggleDevice('${device.androidId}')"
+                                    class="btn btn-sm ${device.isActive ? 'btn-danger' : 'btn-success'}">
+                                    ${device.isActive ? 'Desativar' : 'Ativar'}
+                                </button>
+                            </td>
+                        </tr>
+                    `).join('');
+                }
             } catch (error) {
-                console.error('Erro:', error);
+                console.error('Erro ao carregar dispositivos:', error);
             }
         }
 
         // Registrar dispositivo
         document.getElementById('deviceForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            if (!checkAuth()) return;
             
             const androidId = document.getElementById('androidId').value;
             const description = document.getElementById('description').value;
@@ -176,41 +154,48 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${localStorage.getItem('companyToken')}`
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
                     },
                     body: JSON.stringify({ androidId, description })
                 });
 
+                console.log('Register response:', response.status); // Debug
                 const data = await response.json();
+                console.log('Register data:', data); // Debug
+
                 if (data.success) {
                     document.getElementById('deviceForm').reset();
-                    await loadCompanyInfo();
-                    await loadDevices();
+                    await Promise.all([
+                        loadCompanyInfo(),  // Recarrega info da empresa
+                        loadDevices()       // Recarrega lista de dispositivos
+                    ]);
                     alert('Dispositivo registrado com sucesso!');
                 } else {
-                    alert(data.message || 'Erro ao registrar dispositivo');
+                    throw new Error(data.message || 'Erro ao registrar dispositivo');
                 }
             } catch (error) {
-                console.error('Erro:', error);
-                alert('Erro ao registrar dispositivo');
+                console.error('Erro detalhado:', error);
+                alert(error.message || 'Erro ao registrar dispositivo');
             }
         });
 
         // Ativar/Desativar dispositivo
         async function toggleDevice(androidId) {
-            if (!checkAuth()) return;
-
+            const token = localStorage.getItem('token');
             try {
                 const response = await fetch(`/api/devices/${androidId}/toggle`, {
                     method: 'PUT',
                     headers: {
-                        'Authorization': `Bearer ${localStorage.getItem('companyToken')}`
+                        'Authorization': `Bearer ${token}`
                     }
                 });
 
                 const data = await response.json();
                 if (data.success) {
-                    await loadDevices();
+                    await Promise.all([
+                        loadCompanyInfo(),  // Recarrega info da empresa
+                        loadDevices()       // Recarrega lista de dispositivos
+                    ]);
                 } else {
                     alert(data.message || 'Erro ao alterar status do dispositivo');
                 }
@@ -220,10 +205,22 @@
             }
         }
 
-        // Carregar dados iniciais
-        checkAuth();
-        loadCompanyInfo();
-        loadDevices();
+        function logout() {
+            localStorage.clear();
+            window.location.href = '/';
+        }
+
+        // Inicialização
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                await Promise.all([
+                    loadCompanyInfo(),
+                    loadDevices()
+                ]);
+            } catch (error) {
+                console.error('Erro na inicialização:', error);
+            }
+        });
     </script>
 </body>
 </html>

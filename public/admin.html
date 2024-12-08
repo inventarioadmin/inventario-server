@@ -1,274 +1,182 @@
 <!DOCTYPE html>
-<html>
+<html lang="pt-br">
 <head>
-    <title>Painel Administrativo</title>
     <meta charset="UTF-8">
-    <style>
-        body { 
-            font-family: Arial; 
-            margin: 20px; 
-            background-color: #f0f0f0;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .hidden {
-            display: none;
-        }
-        input, button {
-            padding: 8px;
-            margin: 5px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-        button {
-            background: #4CAF50;
-            color: white;
-            border: none;
-            cursor: pointer;
-        }
-        button:hover {
-            background: #45a049;
-        }
-        .btn-danger {
-            background: #dc3545;
-        }
-        .btn-danger:hover {
-            background: #c82333;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-        }
-        th, td {
-            border: 1px solid #ddd;
-            padding: 12px 8px;
-            text-align: left;
-        }
-        th {
-            background: #f8f9fa;
-        }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Área do Administrador</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body>
-    <div class="container">
-        <!-- Área de Login -->
-        <div id="loginArea">
-            <h1>Painel Administrativo</h1>
-            <div>
-                <input type="text" id="username" placeholder="Usuário">
-                <input type="password" id="password" placeholder="Senha">
-                <button onclick="login()">Entrar</button>
+    <!-- Container principal -->
+    <div id="content" style="display: none;" class="container mt-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>Painel do Administrador</h2>
+            <button onclick="logout()" class="btn btn-danger">Sair</button>
+        </div>
+
+        <!-- Área de informações da empresa -->
+        <div id="companyInfo" class="card mb-4">
+            <div class="card-body">
+                <h4>Informações da Empresa</h4>
+                <div class="row">
+                    <div class="col-md-4">
+                        <p>Nome: <span id="companyName">-</span></p>
+                    </div>
+                    <div class="col-md-4">
+                        <p>Dispositivos: <span id="deviceCount">0</span>/<span id="maxDevices">0</span></p>
+                    </div>
+                    <div class="col-md-4">
+                        <p>Validade: <span id="expirationDate">-</span></p>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <!-- Área de Gerenciamento -->
-        <div id="managementArea" class="hidden">
-            <h1>Painel Administrativo</h1>
-            
-            <h2>Gerenciar Dispositivos</h2>
-            <div>
-                <input type="text" id="imei" placeholder="IMEI" style="width: 200px;">
-                <input type="text" id="description" placeholder="Descrição" style="width: 200px;">
-                <input type="number" id="duration" placeholder="Duração em dias" value="30" min="1" style="width: 120px;">
-                <button onclick="addDevice()">Adicionar Dispositivo</button>
+        <!-- Lista de dispositivos -->
+        <div class="card">
+            <div class="card-body">
+                <h4>Dispositivos Registrados</h4>
+                <div class="table-responsive">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>ID Android</th>
+                                <th>Descrição</th>
+                                <th>Status</th>
+                                <th>Último Acesso</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="deviceList"></tbody>
+                    </table>
+                </div>
             </div>
-
-            <table>
-                <thead>
-                    <tr>
-                        <th>IMEI</th>
-                        <th>Descrição</th>
-                        <th>Status</th>
-                        <th>Último Login</th>
-                        <th>Ações</th>
-                    </tr>
-                </thead>
-                <tbody id="deviceList"></tbody>
-            </table>
         </div>
     </div>
 
     <script>
-        let authToken = '';
-
-        async function login() {
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
-
-            try {
-                const response = await fetch('/api/login', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        username: username,
-                        password: password,
-                        deviceId: 'admin-panel'
-                    })
-                });
-
-                const data = await response.json();
-                if (data.success) {
-                    authToken = data.authKey;
-                    document.getElementById('loginArea').classList.add('hidden');
-                    document.getElementById('managementArea').classList.remove('hidden');
-                    loadDevices();
-                } else {
-                    alert('Login falhou: ' + (data.message || 'Credenciais inválidas'));
-                }
-            } catch (error) {
-                alert('Erro ao fazer login: ' + error.message);
-            }
-        }
-
-        async function loadDevices() {
-    try {
-        const response = await fetch('/api/devices', {
-            headers: {
-                'Authorization': `Bearer ${authToken}`
-            }
-        });
-        
-        if (!response.ok) {
-            throw new Error('Erro ao carregar dispositivos');
-        }
-
-        const devices = await response.json();
-        const tbody = document.getElementById('deviceList');
-        tbody.innerHTML = devices.map(device => {
-            const expirationDate = new Date(device.expirationDate);
-            const now = new Date();
-            const daysRemaining = Math.ceil((expirationDate - now) / (1000 * 60 * 60 * 24));
-            const expirationStatus = daysRemaining <= 0 ? 'Expirado' : 
-                                   daysRemaining <= 7 ? `${daysRemaining} dias (Atenção!)` : 
-                                   `${daysRemaining} dias`;
-            const statusColor = daysRemaining <= 0 ? 'red' : 
-                              daysRemaining <= 7 ? 'orange' : 
-                              'green';
+        // Função para verificar autenticação
+        function checkAdminAuth() {
+            const token = localStorage.getItem('token');
             
-            return `
-                <tr>
-                    <td>${device.imei}</td>
-                    <td>${device.description || ''}</td>
-                    <td style="color: ${device.isActive ? 'green' : 'red'}">
-                        ${device.isActive ? 'Ativo' : 'Inativo'}
-                    </td>
-                    <td style="color: ${statusColor}">
-                        ${expirationStatus}
-                    </td>
-                    <td>${device.lastLogin ? new Date(device.lastLogin).toLocaleString() : 'Nunca'}</td>
-                    <td>
-                        <button onclick="toggleDevice('${device.imei}')" style="margin-right: 5px;">
-                            ${device.isActive ? 'Desativar' : 'Ativar'}
-                        </button>
-                        <button onclick="removeDevice('${device.imei}')" class="btn-danger">
-                            Excluir
-                        </button>
-                    </td>
-                </tr>
-            `;
-        }).join('');
-    } catch (error) {
-        console.error('Erro:', error);
-        if (error.message.includes('token')) {
-            // Reset para tela de login se token expirou
-            document.getElementById('managementArea').classList.add('hidden');
-            document.getElementById('loginArea').classList.remove('hidden');
-        }
-    }
-}
-
-        async function addDevice() {
-    const imei = document.getElementById('imei').value;
-    const description = document.getElementById('description').value;
-    const durationDays = parseInt(document.getElementById('duration').value);
-
-    if (!imei || !description || !durationDays) {
-        alert('Preencha todos os campos');
-        return;
-    }
-
-    try {
-        const response = await fetch('/api/devices', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`
-            },
-            body: JSON.stringify({ 
-                imei, 
-                description,
-                durationDays 
-            })
-        });
-
-        const data = await response.json();
-        if (data.success) {
-            document.getElementById('imei').value = '';
-            document.getElementById('description').value = '';
-            document.getElementById('duration').value = '30';  // Reset para 30 dias
-            loadDevices();
-            alert('Dispositivo adicionado com sucesso!');
-        } else {
-            throw new Error(data.message || 'Erro ao adicionar dispositivo');
-        }
-    } catch (error) {
-        alert(error.message || 'Erro ao adicionar dispositivo');
-    }
-}
-
-        async function removeDevice(imei) {
-            if (!confirm('Tem certeza que deseja excluir este dispositivo?')) {
+            if (!token) {
+                window.location.href = '/';
                 return;
             }
 
             try {
-                const response = await fetch(`/api/devices/${imei}`, {
-                    method: 'DELETE',
+                const payload = JSON.parse(atob(token.split('.')[1]));
+                
+                if (payload.role !== 'admin') {
+                    localStorage.clear();
+                    window.location.href = '/';
+                    return;
+                }
+
+                document.getElementById('content').style.display = 'block';
+                loadCompanyInfo();
+                loadDevices();
+
+            } catch (error) {
+                console.error('Erro ao verificar autenticação:', error);
+                localStorage.clear();
+                window.location.href = '/';
+            }
+        }
+
+        // Função para carregar informações da empresa
+        async function loadCompanyInfo() {
+            const token = localStorage.getItem('token');
+            try {
+                const response = await fetch('/api/company/info', {
                     headers: {
-                        'Authorization': `Bearer ${authToken}`
+                        'Authorization': `Bearer ${token}`
                     }
                 });
 
                 const data = await response.json();
+                
                 if (data.success) {
-                    loadDevices();
-                    alert('Dispositivo excluído com sucesso!');
-                } else {
-                    throw new Error(data.message || 'Erro ao excluir dispositivo');
+                    document.getElementById('companyName').textContent = data.company.name;
+                    document.getElementById('deviceCount').textContent = data.company.currentDevices;
+                    document.getElementById('maxDevices').textContent = data.company.maxDevices;
+                    document.getElementById('expirationDate').textContent = new Date(data.company.expirationDate).toLocaleDateString();
                 }
             } catch (error) {
-                alert(error.message);
+                console.error('Erro ao carregar informações:', error);
             }
         }
 
-        async function toggleDevice(imei) {
+        // Função para carregar dispositivos
+        async function loadDevices() {
+            const token = localStorage.getItem('token');
             try {
-                const response = await fetch(`/api/devices/${imei}`, {
+                const response = await fetch('/api/devices/list', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    const tbody = document.getElementById('deviceList');
+                    tbody.innerHTML = data.devices.map(device => `
+                        <tr>
+                            <td>${device.androidId}</td>
+                            <td>${device.description}</td>
+                            <td>
+                                <span class="badge ${device.isActive ? 'bg-success' : 'bg-danger'}">
+                                    ${device.isActive ? 'Ativo' : 'Inativo'}
+                                </span>
+                            </td>
+                            <td>${device.lastAccess ? new Date(device.lastAccess).toLocaleString() : 'Nunca'}</td>
+                            <td>
+                                <button 
+                                    onclick="toggleDevice('${device.androidId}')"
+                                    class="btn btn-sm ${device.isActive ? 'btn-danger' : 'btn-success'}">
+                                    ${device.isActive ? 'Desativar' : 'Ativar'}
+                                </button>
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (error) {
+                console.error('Erro ao carregar dispositivos:', error);
+            }
+        }
+
+        // Função para ativar/desativar dispositivo
+        async function toggleDevice(androidId) {
+            const token = localStorage.getItem('token');
+            try {
+                const response = await fetch(`/api/devices/${androidId}/toggle`, {
                     method: 'PUT',
                     headers: {
-                        'Authorization': `Bearer ${authToken}`
+                        'Authorization': `Bearer ${token}`
                     }
                 });
 
                 const data = await response.json();
                 if (data.success) {
-                    loadDevices();
+                    loadDevices(); // Recarrega a lista de dispositivos
                 } else {
-                    throw new Error(data.message || 'Erro ao alterar status do dispositivo');
+                    alert(data.message || 'Erro ao alterar status do dispositivo');
                 }
             } catch (error) {
-                alert(error.message);
+                console.error('Erro:', error);
+                alert('Erro ao alterar status do dispositivo');
             }
         }
+
+        // Função de logout
+        function logout() {
+            localStorage.clear();
+            window.location.href = '/';
+        }
+
+        // Executa a verificação de autenticação quando a página carrega
+        document.addEventListener('DOMContentLoaded', checkAdminAuth);
     </script>
 </body>
 </html>

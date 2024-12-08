@@ -42,23 +42,41 @@ const auth = async (req, res, next) => {
         }
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await User.findById(decoded.userId);
         
-        if (!user || !user.isActive) {
-            return res.status(401).json({ message: 'Usuário não autorizado' });
-        }
-
-        // Se for admin, verifica a empresa
-        if (user.role === 'admin' && user.companyId) {
-            const company = await Company.findById(user.companyId);
+        // Se for token de empresa
+        if (decoded.companyId) {
+            const company = await Company.findById(decoded.companyId);
             if (!company || !company.isActive) {
-                return res.status(401).json({ message: 'Empresa inativa' });
+                return res.status(401).json({ message: 'Empresa não autorizada' });
+            }
+            req.company = company; // Salva a empresa no request
+            req.user = { role: 'admin', companyId: company._id }; // Adiciona informações do usuário
+        } 
+        // Se for token de usuário
+        else if (decoded.userId) {
+            const user = await User.findById(decoded.userId);
+            if (!user || !user.isActive) {
+                return res.status(401).json({ message: 'Usuário não autorizado' });
+            }
+            req.user = user;
+            
+            // Se for admin, carrega também a empresa
+            if (user.role === 'admin' && user.companyId) {
+                const company = await Company.findById(user.companyId);
+                if (!company || !company.isActive) {
+                    return res.status(401).json({ message: 'Empresa não autorizada' });
+                }
+                req.company = company;
             }
         }
+        
+        if (!req.user) {
+            return res.status(401).json({ message: 'Token inválido' });
+        }
 
-        req.user = user;
         next();
     } catch (error) {
+        console.error('Erro de autenticação:', error);
         res.status(401).json({ message: 'Token inválido' });
     }
 };
@@ -66,30 +84,37 @@ const auth = async (req, res, next) => {
 // Middleware para verificar licença da empresa
 const checkCompanyLicense = async (req, res, next) => {
     try {
-        if (req.user.role === 'superadmin') {
-            return next();
+        // Se não tem empresa no request, tenta buscar
+        if (!req.company && req.user.companyId) {
+            req.company = await Company.findById(req.user.companyId);
         }
 
-        const company = await Company.findById(req.user.companyId);
-        if (!company) {
+        if (!req.company) {
             return res.status(404).json({
                 success: false,
                 message: 'Empresa não encontrada'
             });
         }
 
+        // Verifica se a empresa está ativa
+        if (!req.company.isActive) {
+            return res.status(403).json({
+                success: false,
+                message: 'Empresa inativa'
+            });
+        }
+
         // Verifica se a licença expirou
-        if (new Date() > new Date(company.expirationDate)) {
+        if (new Date() > new Date(req.company.expirationDate)) {
             return res.status(403).json({
                 success: false,
                 message: 'Licença expirada'
             });
         }
 
-        // Adiciona empresa ao request para uso posterior
-        req.company = company;
         next();
     } catch (error) {
+        console.error('Erro ao verificar licença:', error);
         res.status(500).json({
             success: false,
             message: 'Erro ao verificar licença'
@@ -111,10 +136,33 @@ app.post('/api/login', async (req, res) => {
     try {
         const { username, password } = req.body;
         
-        // Primeiro tenta encontrar um usuário (superadmin)
+        // Primeiro tenta encontrar uma empresa
+        const company = await Company.findOne({ username });
+        
+        if (company) {
+            const isValidPassword = await bcrypt.compare(password, company.password);
+            
+            if (isValidPassword && company.isActive) {
+                const token = jwt.sign(
+                    { 
+                        companyId: company._id,
+                        role: 'admin'
+                    },
+                    process.env.JWT_SECRET,
+                    { expiresIn: '24h' }
+                );
+
+                return res.json({
+                    success: true,
+                    token,
+                    role: 'admin'
+                });
+            }
+        }
+
+        // Se não encontrou empresa, tenta encontrar usuário
         const user = await User.findOne({ username });
         
-        // Se encontrou um usuário
         if (user) {
             const isValidPassword = await bcrypt.compare(password, user.password);
             
@@ -133,39 +181,6 @@ app.post('/api/login', async (req, res) => {
                     success: true,
                     token,
                     role: user.role
-                });
-            }
-        }
-
-        // Se não encontrou usuário, tenta encontrar uma empresa
-        const company = await Company.findOne({ username });
-        
-        if (company) {
-            const isValidPassword = await bcrypt.compare(password, company.password);
-            
-            if (isValidPassword && company.isActive) {
-                // Verifica se a licença está válida
-                if (new Date() > new Date(company.expirationDate)) {
-                    return res.status(403).json({
-                        success: false,
-                        message: 'Licença expirada'
-                    });
-                }
-
-                const token = jwt.sign(
-                    { 
-                        companyId: company._id,
-                        role: 'admin',
-                        username: company.username
-                    },
-                    process.env.JWT_SECRET,
-                    { expiresIn: '24h' }
-                );
-
-                return res.json({
-                    success: true,
-                    token,
-                    role: 'admin'
                 });
             }
         }
@@ -546,11 +561,21 @@ app.get('/api/devices/list', auth, checkCompanyLicense, async (req, res) => {
 // Rota para registrar dispositivo
 app.post('/api/devices/register', auth, checkCompanyLicense, async (req, res) => {
     try {
+        console.log('Corpo da requisição:', req.body);
+        console.log('Empresa:', req.company);
+
         const { androidId, description } = req.body;
+
+        // Validações básicas
+        if (!androidId || !description) {
+            return res.status(400).json({
+                success: false,
+                message: 'ID Android e descrição são obrigatórios'
+            });
+        }
 
         // Verifica se androidId já existe para esta empresa
         const existingDevice = await Device.findOne({
-            companyId: req.company._id,
             androidId: androidId
         });
 
@@ -578,7 +603,8 @@ app.post('/api/devices/register', auth, checkCompanyLicense, async (req, res) =>
         const device = new Device({
             androidId,
             description,
-            companyId: req.company._id
+            companyId: req.company._id,
+            isActive: true
         });
 
         await device.save();
@@ -588,9 +614,10 @@ app.post('/api/devices/register', auth, checkCompanyLicense, async (req, res) =>
             device: device
         });
     } catch (error) {
+        console.error('Erro ao registrar dispositivo:', error);
         res.status(500).json({
             success: false,
-            message: 'Erro ao registrar dispositivo'
+            message: 'Erro ao registrar dispositivo: ' + error.message
         });
     }
 });
@@ -707,7 +734,7 @@ app.get('/superadmin', (req, res) => {
 });
 
 app.get('/admin', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+    res.sendFile(path.join(__dirname, 'public', 'company-panel.html'));
 });
 
 // Inicia o servidor

@@ -8,27 +8,178 @@
 </head>
 <body class="bg-gray-100 min-h-screen">
     <div class="container mx-auto px-4 py-8">
-        <div class="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6">
+        <!-- Área de Navegação Principal -->
+        <div id="mainNavigation" class="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6">
             <h1 class="text-2xl font-bold text-center text-gray-800 mb-8">
                 Sistema de Licenciamento
             </h1>
             
             <div class="space-y-4">
-                <a href="/admin" 
-                   class="block w-full py-3 px-4 text-center text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition duration-200">
+                <button onclick="showAdminLogin()" 
+                   class="w-full py-3 px-4 text-center text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition duration-200">
                     Área do Administrador
-                </a>
+                </button>
                 
-                <a href="/superadmin" 
-                   class="block w-full py-3 px-4 text-center text-white bg-green-600 hover:bg-green-700 rounded-lg transition duration-200">
+                <button onclick="showSuperAdminLogin()" 
+                   class="w-full py-3 px-4 text-center text-white bg-green-600 hover:bg-green-700 rounded-lg transition duration-200">
                     Área do Super Admin
-                </a>
-            </div>
-            
-            <div class="mt-8 text-center text-sm text-gray-600">
-                <p>Escolha uma área para acessar</p>
+                </button>
             </div>
         </div>
+
+        <!-- Área de Login do Admin -->
+        <div id="adminLoginSection" class="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6 hidden">
+            <h2 class="text-xl font-bold text-center text-gray-800 mb-6">Login Administrador</h2>
+            
+            <form id="adminLoginForm" class="space-y-4">
+                <div>
+                    <input type="text" id="adminUsername" 
+                           class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-blue-500"
+                           placeholder="Usuário" required>
+                </div>
+                <div>
+                    <input type="password" id="adminPassword"
+                           class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-blue-500"
+                           placeholder="Senha" required>
+                </div>
+                <button type="submit"
+                        class="w-full py-2 px-4 text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition duration-200">
+                    Entrar
+                </button>
+            </form>
+            <button onclick="voltarParaInicio()" 
+                    class="w-full mt-4 py-2 px-4 text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-lg transition duration-200">
+                Voltar
+            </button>
+        </div>
+
+        <!-- Área de Login do Super Admin -->
+        <div id="superAdminLoginSection" class="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6 hidden">
+            <h2 class="text-xl font-bold text-center text-gray-800 mb-6">Login Super Admin</h2>
+            
+            <form id="superAdminLoginForm" class="space-y-4">
+                <div>
+                    <input type="text" id="superAdminUsername" 
+                           class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-blue-500"
+                           placeholder="Usuário" required>
+                </div>
+                <div>
+                    <input type="password" id="superAdminPassword"
+                           class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-blue-500"
+                           placeholder="Senha" required>
+                </div>
+                <button type="submit"
+                        class="w-full py-2 px-4 text-white bg-green-600 hover:bg-green-700 rounded-lg transition duration-200">
+                    Entrar
+                </button>
+            </form>
+            <button onclick="voltarParaInicio()" 
+                    class="w-full mt-4 py-2 px-4 text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-lg transition duration-200">
+                Voltar
+            </button>
+        </div>
     </div>
+
+    <script>
+        // Funções de navegação
+        function showAdminLogin() {
+            document.getElementById('mainNavigation').classList.add('hidden');
+            document.getElementById('adminLoginSection').classList.remove('hidden');
+            document.getElementById('superAdminLoginSection').classList.add('hidden');
+        }
+
+        function showSuperAdminLogin() {
+            document.getElementById('mainNavigation').classList.add('hidden');
+            document.getElementById('superAdminLoginSection').classList.remove('hidden');
+            document.getElementById('adminLoginSection').classList.add('hidden');
+        }
+
+        function voltarParaInicio() {
+            document.getElementById('mainNavigation').classList.remove('hidden');
+            document.getElementById('adminLoginSection').classList.add('hidden');
+            document.getElementById('superAdminLoginSection').classList.add('hidden');
+            // Limpa os formulários
+            document.getElementById('adminLoginForm').reset();
+            document.getElementById('superAdminLoginForm').reset();
+        }
+
+        // Função para verificar autenticação existente
+        function checkExistingAuth() {
+            const token = localStorage.getItem('token');
+            if (token) {
+                try {
+                    const payload = JSON.parse(atob(token.split('.')[1]));
+                    if (payload.role === 'admin') {
+                        window.location.href = '/admin';
+                        return true;
+                    } else if (payload.role === 'superadmin') {
+                        window.location.href = '/superadmin';
+                        return true;
+                    }
+                } catch (error) {
+                    console.error('Erro ao verificar token:', error);
+                    localStorage.removeItem('token');
+                }
+            }
+            return false;
+        }
+
+        // Função genérica de login
+        async function handleLogin(username, password, loginType) {
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+                
+                if (data.success && data.token) {
+                    localStorage.setItem('token', data.token);
+                    
+                    // Verifica se o role retornado corresponde ao tipo de login
+                    if (loginType === 'admin' && data.role === 'admin') {
+                        window.location.href = '/admin';
+                    } else if (loginType === 'superadmin' && data.role === 'superadmin') {
+                        window.location.href = '/superadmin';
+                    } else {
+                        throw new Error('Acesso não autorizado');
+                    }
+                } else {
+                    throw new Error(data.message || 'Falha no login');
+                }
+            } catch (error) {
+                console.error('Erro:', error);
+                alert(error.message || 'Erro ao fazer login. Verifique suas credenciais.');
+            }
+        }
+
+        // Event Listeners
+        document.addEventListener('DOMContentLoaded', function() {
+            // Limpa o localStorage e verifica autenticação existente
+            if (!checkExistingAuth()) {
+                voltarParaInicio(); // Mostra a tela inicial se não estiver autenticado
+            }
+
+            // Login do Admin
+            document.getElementById('adminLoginForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const username = document.getElementById('adminUsername').value;
+                const password = document.getElementById('adminPassword').value;
+                await handleLogin(username, password, 'admin');
+            });
+
+            // Login do Super Admin
+            document.getElementById('superAdminLoginForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const username = document.getElementById('superAdminUsername').value;
+                const password = document.getElementById('superAdminPassword').value;
+                await handleLogin(username, password, 'superadmin');
+            });
+        });
+    </script>
 </body>
 </html>
