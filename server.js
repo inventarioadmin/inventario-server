@@ -341,6 +341,24 @@ app.get('/api/devices', auth, async (req, res) => {
     }
 });
 
+// Deletar dispositivo
+app.delete('/api/devices/:androidId', auth, async (req, res) => {
+    try {
+        const device = await Device.findOneAndDelete({
+            androidId: req.params.androidId,
+            companyId: req.user.companyId
+        });
+
+        if (!device) {
+            return res.status(404).json({ success: false, message: 'Dispositivo não encontrado' });
+        }
+
+        res.json({ success: true, message: 'Dispositivo excluído com sucesso' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Erro ao excluir dispositivo' });
+    }
+});
+
 // Registrar dispositivo
 app.post('/api/devices', auth, async (req, res) => {
     try {
@@ -398,6 +416,35 @@ app.put('/api/devices/:androidId/toggle', auth, async (req, res) => {
         res.status(500).json({ success: false, message: 'Erro ao alterar status do dispositivo' });
     }
 });
+
+// Excluir dispositivo
+async function deleteDevice(androidId) {
+    if (!checkAuth()) return;
+
+    // Confirma com o usuário antes de excluir
+    if (!confirm('Tem certeza que deseja excluir este dispositivo? Esta ação não pode ser desfeita.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/devices/${androidId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+            }
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            await Promise.all([loadCompanyInfo(), loadDevices()]);
+            alert('Dispositivo excluído com sucesso!');
+        } else {
+            throw new Error(data.message || 'Erro ao excluir dispositivo');
+        }
+    } catch (error) {
+        alert(error.message || 'Erro ao excluir dispositivo');
+    }
+}
 
 // Rota de verificação do aplicativo Android
 app.post('/api/verify-device', auth, async (req, res) => {

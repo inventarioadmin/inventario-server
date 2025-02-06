@@ -130,25 +130,30 @@
                 const data = await response.json();
                 if (data.success && data.devices) {
                     const tbody = document.getElementById('deviceList');
-                    tbody.innerHTML = data.devices.map(device => `
-                        <tr>
-                            <td>${device.androidId}</td>
-                            <td>${device.description}</td>
-                            <td>
-                                <span class="badge ${device.isActive ? 'bg-success' : 'bg-danger'}">
-                                    ${device.isActive ? 'Ativo' : 'Inativo'}
-                                </span>
-                            </td>
-                            <td>${device.lastAccess ? new Date(device.lastAccess).toLocaleString() : 'Nunca'}</td>
-                            <td>
-                                <button 
-                                    onclick="toggleDevice('${device.androidId}')"
-                                    class="btn btn-sm ${device.isActive ? 'btn-danger' : 'btn-success'}">
-                                    ${device.isActive ? 'Desativar' : 'Ativar'}
-                                </button>
-                            </td>
-                        </tr>
-                    `).join('');
+tbody.innerHTML = data.devices.map(device => `
+    <tr>
+        <td>${device.androidId}</td>
+        <td>${device.description}</td>
+        <td>
+            <span class="badge ${device.isActive ? 'bg-success' : 'bg-danger'}">
+                ${device.isActive ? 'Ativo' : 'Inativo'}
+            </span>
+        </td>
+        <td>${device.lastAccess ? new Date(device.lastAccess).toLocaleString() : 'Nunca'}</td>
+        <td>
+            <button 
+                onclick="toggleDevice('${device.androidId}')"
+                class="btn btn-sm ${device.isActive ? 'btn-danger' : 'btn-success'} me-2">
+                ${device.isActive ? 'Desativar' : 'Ativar'}
+            </button>
+            <button 
+                onclick="deleteDevice('${device.androidId}')"
+                class="btn btn-sm btn-danger">
+                Excluir
+            </button>
+        </td>
+    </tr>
+`).join('');
                 }
             } catch (error) {
                 console.error('Erro ao carregar dispositivos:', error);
