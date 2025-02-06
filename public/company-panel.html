@@ -84,32 +84,34 @@
         }
 
         // Função para carregar informações da empresa
-        async function loadCompanyInfo() {
-            if (!checkAuth()) return;
+// Função para carregar informações da empresa
+async function loadCompanyInfo() {
+    if (!checkAuth()) return;
 
-            try {
-                const response = await fetch('/api/company/info', {
-                    headers: {
-                        'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-                    }
-                });
-
-                if (response.status === 401) {
-                    logout();
-                    return;
-                }
-
-                const data = await response.json();
-                if (data.success) {
-                    document.getElementById('deviceCount').textContent = data.company.currentDevices || '0';
-                    document.getElementById('maxDevices').textContent = data.company.maxDevices || '0';
-                    document.getElementById('licenseExpiration').textContent = 
-                        data.company.expirationDate ? new Date(data.company.expirationDate).toLocaleDateString() : '-';
-                }
-            } catch (error) {
-                console.error('Erro ao carregar info:', error);
+    try {
+        const response = await fetch('/api/company/info', {
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('authToken')}`
             }
+        });
+
+        if (response.status === 401) {
+            logout();
+            return;
         }
+
+        const data = await response.json();
+        if (data.success) {
+            // Atualiza a contagem de dispositivos
+            document.getElementById('deviceCount').textContent = data.company.deviceCount || '0';
+            document.getElementById('maxDevices').textContent = data.company.maxDevices || '0';
+            document.getElementById('licenseExpiration').textContent = 
+                data.company.expirationDate ? new Date(data.company.expirationDate).toLocaleDateString() : '-';
+        }
+    } catch (error) {
+        console.error('Erro ao carregar info:', error);
+    }
+}
 
         // Função para carregar dispositivos
         async function loadDevices() {
@@ -213,6 +215,39 @@
                 alert('Erro ao alterar status do dispositivo');
             }
         }
+
+        async function deleteDevice(androidId) {
+    if (!checkAuth()) return;
+
+    // Confirma com o usuário antes de excluir
+    if (!confirm('Tem certeza que deseja excluir este dispositivo? Esta ação não pode ser desfeita.')) {
+        return;
+    }
+
+    try {
+        console.log('Tentando excluir dispositivo:', androidId);
+        const response = await fetch(`/api/devices/${androidId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+            }
+        });
+
+        console.log('Resposta do servidor:', response.status);
+        const data = await response.json();
+        console.log('Dados da resposta:', data);
+
+        if (data.success) {
+            await Promise.all([loadCompanyInfo(), loadDevices()]);
+            alert('Dispositivo excluído com sucesso!');
+        } else {
+            throw new Error(data.message || 'Erro ao excluir dispositivo');
+        }
+    } catch (error) {
+        console.error('Erro completo:', error);
+        alert(error.message || 'Erro ao excluir dispositivo');
+    }
+}
 
         function logout() {
             localStorage.removeItem('authToken');
