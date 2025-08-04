@@ -620,7 +620,116 @@ app.post('/api/mobile/login', async (req, res) => {
     }
 });
 
-// ===== NOVOS ENDPOINTS DE SINCRONIZAÇÃO =====
+// ENDPOINTS DE SINCRONIZAÇÃO PARA APP (aceita token admin)
+
+// 1. UPLOAD DE DADOS COLETADOS (aceita token admin)
+app.post('/api/app/sync/upload', auth, upload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: 'Arquivo não fornecido' });
+        }
+
+        // Para token admin, pega o androidId do body ou usa um padrão
+        const androidId = req.body.androidId || 'admin-device';
+
+        const syncLog = new SyncLog({
+            companyId: req.user.companyId,
+            androidId: androidId,
+            type: 'upload',
+            filename: req.file.filename,
+            originalName: req.file.originalname,
+            fileSize: req.file.size
+        });
+
+        await syncLog.save();
+
+        res.json({
+            success: true,
+            message: 'Dados enviados com sucesso',
+            uploadId: syncLog._id,
+            timestamp: syncLog.timestamp
+        });
+
+    } catch (error) {
+        console.error('Erro no upload:', error);
+        res.status(500).json({ success: false, message: 'Erro no upload: ' + error.message });
+    }
+});
+
+// 2. LISTAR CARGAS DISPONÍVEIS (aceita token admin)
+app.get('/api/app/sync/loads', auth, checkLicense, async (req, res) => {
+    try {
+        const loads = await Load.find({
+            companyId: req.user.companyId,
+            isActive: true
+        }).sort({ uploadDate: -1 });
+
+        const formattedLoads = loads.map(load => ({
+            id: load._id,
+            type: load.type,
+            description: load.description || load.originalName,
+            version: load.version,
+            uploadDate: load.uploadDate,
+            size: load.fileSize || 0
+        }));
+
+        res.json({
+            success: true,
+            loads: formattedLoads
+        });
+
+    } catch (error) {
+        console.error('Erro ao listar cargas:', error);
+        res.status(500).json({ success: false, message: 'Erro ao listar cargas' });
+    }
+});
+
+// 3. DOWNLOAD DE CARGA (aceita token admin)
+app.get('/api/app/sync/download/:loadId', auth, checkLicense, async (req, res) => {
+    try {
+        const load = await Load.findOne({
+            _id: req.params.loadId,
+            companyId: req.user.companyId,
+            isActive: true
+        });
+
+        if (!load) {
+            return res.status(404).json({ success: false, message: 'Carga não encontrada' });
+        }
+
+        const filePath = path.join(__dirname, 'loads', req.user.companyId.toString(), load.filename);
+        
+        try {
+            await fs.access(filePath);
+        } catch {
+            return res.status(404).json({ success: false, message: 'Arquivo não encontrado no servidor' });
+        }
+
+        // Para token admin, usa um androidId padrão
+        const androidId = req.body.androidId || 'admin-device';
+
+        const syncLog = new SyncLog({
+            companyId: req.user.companyId,
+            androidId: androidId,
+            type: 'download',
+            filename: load.filename,
+            originalName: load.originalName,
+            fileSize: load.fileSize || 0
+        });
+
+        await syncLog.save();
+
+        res.setHeader('Content-Disposition', `attachment; filename="${load.originalName}"`);
+        res.setHeader('Content-Type', 'text/csv');
+        res.sendFile(filePath);
+
+    } catch (error) {
+        console.error('Erro no download:', error);
+        res.status(500).json({ success: false, message: 'Erro no download: ' + error.message });
+    }
+});
+
+// ===== ENDPOINTS ORIGINAIS DE SINCRONIZAÇÃO (para tokens mobile) =====
 
 // 1. UPLOAD DE DADOS COLETADOS (do app para servidor)
 app.post('/api/mobile/sync/upload', mobileAuth, upload.single('file'), async (req, res) => {

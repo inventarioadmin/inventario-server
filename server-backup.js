@@ -5,6 +5,8 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const path = require('path');
 const cors = require('cors');
+const multer = require('multer');
+const fs = require('fs').promises;
 
 const app = express();
 
@@ -31,6 +33,64 @@ const userSchema = new mongoose.Schema({
 });
 
 const User = mongoose.model('User', userSchema);
+
+// NOVOS SCHEMAS PARA SINCRONIZAÇÃO
+const syncSchema = new mongoose.Schema({
+    companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true },
+    androidId: { type: String, required: true },
+    type: { type: String, enum: ['upload', 'download'], required: true },
+    filename: { type: String, required: true },
+    originalName: { type: String, required: true },
+    fileSize: { type: Number, required: true },
+    timestamp: { type: Date, default: Date.now },
+    status: { type: String, enum: ['pending', 'completed', 'error'], default: 'completed' }
+});
+
+const SyncLog = mongoose.model('SyncLog', syncSchema);
+
+const loadSchema = new mongoose.Schema({
+    companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true },
+    type: { type: String, enum: ['parcelas', 'parametros'], required: true },
+    filename: { type: String, required: true },
+    originalName: { type: String, required: true },
+    description: { type: String },
+    uploadedBy: { type: String },
+    uploadDate: { type: Date, default: Date.now },
+    isActive: { type: Boolean, default: true },
+    version: { type: String, required: true },
+    fileSize: { type: Number, default: 0 }
+});
+
+const Load = mongoose.model('Load', loadSchema);
+
+// CONFIGURAÇÃO DO MULTER PARA UPLOAD DE ARQUIVOS
+const storage = multer.diskStorage({
+    destination: async (req, file, cb) => {
+        const dir = path.join(__dirname, 'uploads', req.user.companyId.toString());
+        try {
+            await fs.mkdir(dir, { recursive: true });
+            cb(null, dir);
+        } catch (error) {
+            cb(error);
+        }
+    },
+    filename: (req, file, cb) => {
+        const timestamp = new Date().toISOString().replace(/:/g, '-').split('.')[0];
+        cb(null, `${timestamp}_${file.originalname}`);
+    }
+});
+
+const upload = multer({ 
+    storage,
+    limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) {
+            cb(null, true);
+        } else {
+            cb(new Error('Apenas arquivos CSV são permitidos'));
+        }
+    }
+});
 
 // Middleware de Autenticação
 const auth = async (req, res, next) => {
@@ -64,6 +124,46 @@ const auth = async (req, res, next) => {
     }
 };
 
+// MIDDLEWARE PARA AUTENTICAÇÃO MOBILE
+const mobileAuth = async (req, res, next) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({ success: false, message: 'Token não fornecido' });
+        }
+
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        
+        if (decoded.type !== 'mobile') {
+            return res.status(401).json({ success: false, message: 'Token inválido para mobile' });
+        }
+
+        const company = await Company.findById(decoded.companyId);
+        if (!company || !company.isActive) {
+            return res.status(401).json({ success: false, message: 'Empresa não autorizada' });
+        }
+
+        const device = await Device.findOne({
+            androidId: decoded.androidId,
+            companyId: decoded.companyId,
+            isActive: true
+        });
+
+        if (!device) {
+            return res.status(401).json({ success: false, message: 'Dispositivo não autorizado' });
+        }
+
+        req.company = company;
+        req.device = device;
+        req.user = { companyId: company._id, androidId: decoded.androidId };
+        
+        next();
+    } catch (error) {
+        console.error('Erro auth mobile:', error);
+        res.status(401).json({ success: false, message: 'Token inválido' });
+    }
+};
+
 // Middleware Superadmin
 const superadminOnly = (req, res, next) => {
     if (req.user.role !== 'superadmin') {
@@ -94,11 +194,10 @@ const checkLicense = async (req, res, next) => {
 };
 
 // Rota de Login
-// Rota de Login com logs detalhados
 app.post('/api/login', async (req, res) => {
     try {
         const { username, password, type } = req.body;
-        console.log('Login attempt - Body:', req.body); // Log completo do body
+        console.log('Login attempt - Body:', req.body);
 
         // Validação básica
         if (!username || !password || !type) {
@@ -331,7 +430,39 @@ app.get('/api/company/info', auth, checkLicense, async (req, res) => {
     }
 });
 
-// Listar dispositivos
+// Listar dispositivos (ATUALIZADO COM INFO DE SYNC)
+app.get('/api/devices/list', auth, checkLicense, async (req, res) => {
+    try {
+        const devices = await Device.find({ companyId: req.user.companyId });
+        
+        const devicesWithSync = await Promise.all(devices.map(async device => {
+            const lastSync = await SyncLog.findOne({
+                companyId: req.user.companyId,
+                androidId: device.androidId
+            }).sort({ timestamp: -1 });
+
+            return {
+                ...device.toObject(),
+                lastSync: lastSync ? {
+                    type: lastSync.type,
+                    timestamp: lastSync.timestamp,
+                    filename: lastSync.originalName
+                } : null
+            };
+        }));
+
+        res.json({
+            success: true,
+            devices: devicesWithSync
+        });
+
+    } catch (error) {
+        console.error('Erro ao listar dispositivos:', error);
+        res.status(500).json({ success: false, message: 'Erro ao listar dispositivos' });
+    }
+});
+
+// Listar dispositivos (mantém compatibilidade com painel antigo)
 app.get('/api/devices', auth, async (req, res) => {
     try {
         const devices = await Device.find({ companyId: req.user.companyId });
@@ -417,7 +548,6 @@ app.put('/api/devices/:androidId/toggle', auth, async (req, res) => {
     }
 });
 
-
 // Rota de verificação do aplicativo Android
 app.post('/api/verify-device', auth, async (req, res) => {
     try {
@@ -490,6 +620,321 @@ app.post('/api/mobile/login', async (req, res) => {
     }
 });
 
+// ===== NOVOS ENDPOINTS DE SINCRONIZAÇÃO =====
+
+// 1. UPLOAD DE DADOS COLETADOS (do app para servidor)
+app.post('/api/mobile/sync/upload', mobileAuth, upload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: 'Arquivo não fornecido' });
+        }
+
+        const syncLog = new SyncLog({
+            companyId: req.user.companyId,
+            androidId: req.user.androidId,
+            type: 'upload',
+            filename: req.file.filename,
+            originalName: req.file.originalname,
+            fileSize: req.file.size
+        });
+
+        await syncLog.save();
+
+        req.device.lastAccess = new Date();
+        await req.device.save();
+
+        res.json({
+            success: true,
+            message: 'Dados enviados com sucesso',
+            uploadId: syncLog._id,
+            timestamp: syncLog.timestamp
+        });
+
+    } catch (error) {
+        console.error('Erro no upload:', error);
+        res.status(500).json({ success: false, message: 'Erro no upload: ' + error.message });
+    }
+});
+
+// 2. LISTAR CARGAS DISPONÍVEIS (para o app)
+app.get('/api/mobile/sync/loads', mobileAuth, async (req, res) => {
+    try {
+        const loads = await Load.find({
+            companyId: req.user.companyId,
+            isActive: true
+        }).sort({ uploadDate: -1 });
+
+        const formattedLoads = loads.map(load => ({
+            id: load._id,
+            type: load.type,
+            description: load.description || load.originalName,
+            version: load.version,
+            uploadDate: load.uploadDate,
+            size: load.fileSize || 0
+        }));
+
+        res.json({
+            success: true,
+            loads: formattedLoads
+        });
+
+    } catch (error) {
+        console.error('Erro ao listar cargas:', error);
+        res.status(500).json({ success: false, message: 'Erro ao listar cargas' });
+    }
+});
+
+// 3. DOWNLOAD DE CARGA (do servidor para app)
+app.get('/api/mobile/sync/download/:loadId', mobileAuth, async (req, res) => {
+    try {
+        const load = await Load.findOne({
+            _id: req.params.loadId,
+            companyId: req.user.companyId,
+            isActive: true
+        });
+
+        if (!load) {
+            return res.status(404).json({ success: false, message: 'Carga não encontrada' });
+        }
+
+        const filePath = path.join(__dirname, 'loads', req.user.companyId.toString(), load.filename);
+        
+        try {
+            await fs.access(filePath);
+        } catch {
+            return res.status(404).json({ success: false, message: 'Arquivo não encontrado no servidor' });
+        }
+
+        const syncLog = new SyncLog({
+            companyId: req.user.companyId,
+            androidId: req.user.androidId,
+            type: 'download',
+            filename: load.filename,
+            originalName: load.originalName,
+            fileSize: load.fileSize || 0
+        });
+
+        await syncLog.save();
+
+        req.device.lastAccess = new Date();
+        await req.device.save();
+
+        res.setHeader('Content-Disposition', `attachment; filename="${load.originalName}"`);
+        res.setHeader('Content-Type', 'text/csv');
+        res.sendFile(filePath);
+
+    } catch (error) {
+        console.error('Erro no download:', error);
+        res.status(500).json({ success: false, message: 'Erro no download: ' + error.message });
+    }
+});
+
+// 4. UPLOAD DE CARGAS (admin para servidor)
+app.post('/api/admin/loads/upload', auth, checkLicense, upload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: 'Arquivo não fornecido' });
+        }
+
+        const { type, description, version } = req.body;
+
+        if (!type || !['parcelas', 'parametros'].includes(type)) {
+            return res.status(400).json({ success: false, message: 'Tipo inválido' });
+        }
+
+        if (!version) {
+            return res.status(400).json({ success: false, message: 'Versão é obrigatória' });
+        }
+
+        const loadDir = path.join(__dirname, 'loads', req.user.companyId.toString());
+        await fs.mkdir(loadDir, { recursive: true });
+        
+        const newFilename = `${type}_${version}_${Date.now()}.csv`;
+        const newPath = path.join(loadDir, newFilename);
+        
+        await fs.rename(req.file.path, newPath);
+
+        const load = new Load({
+            companyId: req.user.companyId,
+            type,
+            filename: newFilename,
+            originalName: req.file.originalname,
+            description,
+            uploadedBy: req.company.username,
+            version,
+            fileSize: req.file.size
+        });
+
+        await load.save();
+
+        res.json({
+            success: true,
+            message: 'Carga enviada com sucesso',
+            load: {
+                id: load._id,
+                type: load.type,
+                description: load.description,
+                version: load.version,
+                uploadDate: load.uploadDate
+            }
+        });
+
+    } catch (error) {
+        console.error('Erro no upload da carga:', error);
+        res.status(500).json({ success: false, message: 'Erro no upload: ' + error.message });
+    }
+});
+
+// 5. LISTAR CARGAS (para admin)
+app.get('/api/admin/loads', auth, checkLicense, async (req, res) => {
+    try {
+        const loads = await Load.find({
+            companyId: req.user.companyId
+        }).sort({ uploadDate: -1 });
+
+        res.json({
+            success: true,
+            loads: loads.map(load => ({
+                id: load._id,
+                type: load.type,
+                description: load.description,
+                version: load.version,
+                originalName: load.originalName,
+                uploadDate: load.uploadDate,
+                uploadedBy: load.uploadedBy,
+                isActive: load.isActive,
+                fileSize: load.fileSize
+            }))
+        });
+
+    } catch (error) {
+        console.error('Erro ao listar cargas:', error);
+        res.status(500).json({ success: false, message: 'Erro ao listar cargas' });
+    }
+});
+
+// 6. ATIVAR/DESATIVAR CARGA
+app.put('/api/admin/loads/:loadId/toggle', auth, checkLicense, async (req, res) => {
+    try {
+        const load = await Load.findOne({
+            _id: req.params.loadId,
+            companyId: req.user.companyId
+        });
+
+        if (!load) {
+            return res.status(404).json({ success: false, message: 'Carga não encontrada' });
+        }
+
+        load.isActive = !load.isActive;
+        await load.save();
+
+        res.json({
+            success: true,
+            message: `Carga ${load.isActive ? 'ativada' : 'desativada'} com sucesso`,
+            load: {
+                id: load._id,
+                isActive: load.isActive
+            }
+        });
+
+    } catch (error) {
+        console.error('Erro ao alterar status da carga:', error);
+        res.status(500).json({ success: false, message: 'Erro ao alterar status' });
+    }
+});
+
+// 7. HISTÓRICO DE SINCRONIZAÇÕES
+app.get('/api/admin/sync/history', auth, checkLicense, async (req, res) => {
+    try {
+        const history = await SyncLog.find({
+            companyId: req.user.companyId
+        }).sort({ timestamp: -1 }).limit(100);
+
+        res.json({
+            success: true,
+            history: history.map(log => ({
+                id: log._id,
+                androidId: log.androidId,
+                type: log.type,
+                filename: log.originalName,
+                fileSize: log.fileSize,
+                timestamp: log.timestamp,
+                status: log.status
+            }))
+        });
+
+    } catch (error) {
+        console.error('Erro ao buscar histórico:', error);
+        res.status(500).json({ success: false, message: 'Erro ao buscar histórico' });
+    }
+});
+
+// 8. BAIXAR DADOS COLETADOS (admin)
+app.get('/api/admin/sync/download/:syncId', auth, checkLicense, async (req, res) => {
+    try {
+        const syncLog = await SyncLog.findOne({
+            _id: req.params.syncId,
+            companyId: req.user.companyId,
+            type: 'upload'
+        });
+
+        if (!syncLog) {
+            return res.status(404).json({ success: false, message: 'Arquivo não encontrado' });
+        }
+
+        const filePath = path.join(__dirname, 'uploads', req.user.companyId.toString(), syncLog.filename);
+        
+        try {
+            await fs.access(filePath);
+        } catch {
+            return res.status(404).json({ success: false, message: 'Arquivo não encontrado no servidor' });
+        }
+
+        res.setHeader('Content-Disposition', `attachment; filename="${syncLog.originalName}"`);
+        res.setHeader('Content-Type', 'text/csv');
+        res.sendFile(filePath);
+
+    } catch (error) {
+        console.error('Erro no download:', error);
+        res.status(500).json({ success: false, message: 'Erro no download: ' + error.message });
+    }
+});
+
+// 9. EXCLUIR CARGA
+app.delete('/api/admin/loads/:loadId', auth, checkLicense, async (req, res) => {
+    try {
+        const load = await Load.findOne({
+            _id: req.params.loadId,
+            companyId: req.user.companyId
+        });
+
+        if (!load) {
+            return res.status(404).json({ success: false, message: 'Carga não encontrada' });
+        }
+
+        // Remove o arquivo físico
+        const filePath = path.join(__dirname, 'loads', req.user.companyId.toString(), load.filename);
+        try {
+            await fs.unlink(filePath);
+            console.log('Arquivo removido:', filePath);
+        } catch (error) {
+            console.log('Arquivo não encontrado para remoção:', filePath);
+        }
+
+        // Remove do banco de dados
+        await load.deleteOne();
+
+        res.json({
+            success: true,
+            message: 'Carga excluída com sucesso'
+        });
+
+    } catch (error) {
+        console.error('Erro ao excluir carga:', error);
+        res.status(500).json({ success: false, message: 'Erro ao excluir carga' });
+    }
+});
+
 // Rotas estáticas
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -516,8 +961,6 @@ app.use((error, req, res, next) => {
         message: 'Erro interno do servidor'
     });
 });
-
-
 
 // Inicia o servidor
 const PORT = process.env.PORT || 3000;
