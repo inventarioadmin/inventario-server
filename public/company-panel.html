@@ -403,6 +403,11 @@
                                                     class="btn btn-outline-${load.isActive ? 'success' : 'danger'}">
                                                 ${load.isActive ? 'Ativo' : 'Inativo'}
                                             </button>
+                                            <button onclick="deleteLoad('${load.id}')" 
+                                                    class="btn btn-outline-danger" 
+                                                    title="Excluir carga">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
                                         </div>
                                     </div>
                                 </div>
@@ -511,6 +516,35 @@
             } catch (error) {
                 console.error('Erro no download:', error);
                 alert('Erro ao baixar arquivo');
+            }
+        }
+
+        // Função para excluir carga
+        async function deleteLoad(loadId) {
+            const token = localStorage.getItem('authToken');
+            
+            if (!confirm('Tem certeza que deseja excluir esta carga? Esta ação não pode ser desfeita.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/admin/loads/${loadId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    alert('Carga excluída com sucesso!');
+                    loadCargas();
+                } else {
+                    alert(data.message || 'Erro ao excluir carga');
+                }
+            } catch (error) {
+                console.error('Erro:', error);
+                alert('Erro ao excluir carga');
             }
         }
 

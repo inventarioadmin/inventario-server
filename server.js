@@ -900,6 +900,41 @@ app.get('/api/admin/sync/download/:syncId', auth, checkLicense, async (req, res)
     }
 });
 
+// 9. EXCLUIR CARGA
+app.delete('/api/admin/loads/:loadId', auth, checkLicense, async (req, res) => {
+    try {
+        const load = await Load.findOne({
+            _id: req.params.loadId,
+            companyId: req.user.companyId
+        });
+
+        if (!load) {
+            return res.status(404).json({ success: false, message: 'Carga não encontrada' });
+        }
+
+        // Remove o arquivo físico
+        const filePath = path.join(__dirname, 'loads', req.user.companyId.toString(), load.filename);
+        try {
+            await fs.unlink(filePath);
+            console.log('Arquivo removido:', filePath);
+        } catch (error) {
+            console.log('Arquivo não encontrado para remoção:', filePath);
+        }
+
+        // Remove do banco de dados
+        await load.deleteOne();
+
+        res.json({
+            success: true,
+            message: 'Carga excluída com sucesso'
+        });
+
+    } catch (error) {
+        console.error('Erro ao excluir carga:', error);
+        res.status(500).json({ success: false, message: 'Erro ao excluir carga' });
+    }
+});
+
 // Rotas estáticas
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
