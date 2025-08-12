@@ -622,21 +622,63 @@ app.post('/api/mobile/login', async (req, res) => {
 
 // ENDPOINTS DE SINCRONIZAÇÃO PARA APP (aceita token admin)
 
-// 1. UPLOAD DE DADOS COLETADOS (aceita token admin)
+// 1. UPLOAD DE DADOS COLETADOS (aceita token admin) - CORRIGIDO
 app.post('/api/app/sync/upload', auth, upload.single('file'), async (req, res) => {
     try {
         if (!req.file) {
             return res.status(400).json({ success: false, message: 'Arquivo não fornecido' });
         }
 
+        // NOVO: Determinar tipo baseado no nome do arquivo
+        let type = 'parametros'; // padrão
+        let description = req.file.originalname;
+        
+        if (req.file.originalname.toLowerCase().includes('ua_') || 
+            req.file.originalname.toLowerCase().includes('parcela')) {
+            type = 'parcelas';
+            description = `Parcelas - ${req.file.originalname}`;
+        } else if (req.file.originalname.toLowerCase().includes('cub_') || 
+                   req.file.originalname.toLowerCase().includes('cubagem')) {
+            type = 'cubagem';
+            description = `Cubagem - ${req.file.originalname}`;
+        } else if (req.file.originalname.toLowerCase().includes('param')) {
+            type = 'parametros';
+            description = `Parâmetros - ${req.file.originalname}`;
+        }
+
         // Para token admin, pega o androidId do body ou usa um padrão
         const androidId = req.body.androidId || 'admin-device';
 
+        // NOVO: Mover arquivo para pasta loads e registrar como Load
+        const loadDir = path.join(__dirname, 'loads', req.user.companyId.toString());
+        await fs.mkdir(loadDir, { recursive: true });
+        
+        const newFilename = req.file.filename; // Mantém o nome com timestamp
+        const newPath = path.join(loadDir, newFilename);
+        
+        // Move de uploads/ para loads/
+        await fs.rename(req.file.path, newPath);
+
+        // Registra como Load no banco para aparecer na lista
+        const load = new Load({
+            companyId: req.user.companyId,
+            type,
+            filename: newFilename,
+            originalName: req.file.originalname,
+            description,
+            uploadedBy: 'Mobile App',
+            version: new Date().toISOString().split('T')[0], // Data como versão
+            fileSize: req.file.size
+        });
+
+        await load.save();
+
+        // Registra o log de sync
         const syncLog = new SyncLog({
             companyId: req.user.companyId,
             androidId: androidId,
             type: 'upload',
-            filename: req.file.filename,
+            filename: newFilename,
             originalName: req.file.originalname,
             fileSize: req.file.size
         });
@@ -647,6 +689,7 @@ app.post('/api/app/sync/upload', auth, upload.single('file'), async (req, res) =
             success: true,
             message: 'Dados enviados com sucesso',
             uploadId: syncLog._id,
+            loadId: load._id,
             timestamp: syncLog.timestamp
         });
 
@@ -1041,6 +1084,32 @@ app.delete('/api/admin/loads/:loadId', auth, checkLicense, async (req, res) => {
     } catch (error) {
         console.error('Erro ao excluir carga:', error);
         res.status(500).json({ success: false, message: 'Erro ao excluir carga' });
+    }
+});
+
+// DEBUG: Verificar arquivos na pasta loads
+app.get('/api/debug/loads/:companyId', auth, async (req, res) => {
+    try {
+        const loadsDir = path.join(__dirname, 'loads', req.params.companyId);
+        
+        try {
+            const files = await fs.readdir(loadsDir);
+            res.json({
+                success: true,
+                directory: loadsDir,
+                files: files,
+                count: files.length
+            });
+        } catch (error) {
+            res.json({
+                success: false,
+                directory: loadsDir,
+                error: 'Pasta não existe',
+                files: []
+            });
+        }
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
     }
 });
 
