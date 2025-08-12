@@ -430,6 +430,132 @@ app.get('/api/company/info', auth, checkLicense, async (req, res) => {
     }
 });
 
+// Nova rota para atualizar campo específico da empresa
+app.put('/api/companies/:id/update-field', auth, superadminOnly, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const updates = req.body;
+        
+        // Valida se é apenas um campo por vez
+        const fields = Object.keys(updates);
+        if (fields.length !== 1) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Apenas um campo pode ser atualizado por vez' 
+            });
+        }
+
+        const field = fields[0];
+        const value = updates[field];
+
+        // Validações específicas por campo
+        if (field === 'username') {
+            if (!value || value.trim() === '') {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: 'Usuário não pode estar vazio' 
+                });
+            }
+            
+            // Verifica se username já existe em outra empresa
+            const existingCompany = await Company.findOne({ 
+                username: value.trim(),
+                _id: { $ne: id }
+            });
+            
+            if (existingCompany) {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: 'Este usuário já existe em outra empresa' 
+                });
+            }
+        }
+
+        if (field === 'name') {
+            if (!value || value.trim() === '') {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: 'Nome da empresa não pode estar vazio' 
+                });
+            }
+        }
+
+        if (field === 'maxDevices') {
+            const num = parseInt(value);
+            if (isNaN(num) || num < 1) {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: 'Limite de dispositivos deve ser um número maior que 0' 
+                });
+            }
+        }
+
+        if (field === 'expirationDate') {
+            const date = new Date(value);
+            if (isNaN(date.getTime())) {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: 'Data inválida' 
+                });
+            }
+        }
+
+        // Prepara a atualização
+        const updateData = {};
+        
+        if (field === 'password') {
+            // Hash da nova senha
+            const salt = await bcrypt.genSalt(10);
+            updateData.password = await bcrypt.hash(value, salt);
+        } else if (field === 'maxDevices') {
+            updateData.maxDevices = parseInt(value);
+        } else if (field === 'expirationDate') {
+            updateData.expirationDate = new Date(value);
+        } else {
+            updateData[field] = value.trim();
+        }
+
+        // Atualiza no banco
+        const company = await Company.findByIdAndUpdate(
+            id,
+            { $set: updateData },
+            { new: true }
+        );
+
+        if (!company) {
+            return res.status(404).json({ 
+                success: false, 
+                message: 'Empresa não encontrada' 
+            });
+        }
+
+        res.json({ 
+            success: true, 
+            message: `${getFieldDisplayName(field)} atualizado com sucesso`,
+            company: company
+        });
+
+    } catch (error) {
+        console.error('Erro ao atualizar campo:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Erro interno do servidor' 
+        });
+    }
+});
+
+// Função auxiliar para nomes dos campos
+function getFieldDisplayName(field) {
+    const names = {
+        'name': 'Nome da empresa',
+        'username': 'Usuário',
+        'password': 'Senha',
+        'maxDevices': 'Limite de dispositivos',
+        'expirationDate': 'Data de expiração'
+    };
+    return names[field] || field;
+}
+
 // Listar dispositivos (ATUALIZADO COM INFO DE SYNC)
 app.get('/api/devices/list', auth, checkLicense, async (req, res) => {
     try {
