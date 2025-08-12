@@ -17,7 +17,7 @@
         }
 
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 20px auto;
             padding: 20px;
         }
@@ -101,6 +101,24 @@
             background: #c82333;
         }
 
+        .btn-warning {
+            background: #ffc107;
+            color: #212529;
+        }
+
+        .btn-warning:hover {
+            background: #e0a800;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
         table {
             width: 100%;
             border-collapse: collapse;
@@ -132,6 +150,7 @@
         .action-buttons {
             display: flex;
             gap: 5px;
+            flex-wrap: wrap;
         }
 
         .action-buttons button {
@@ -173,6 +192,46 @@
             width: 100%;
             padding: 10px;
         }
+
+        /* Estilos para campos editáveis */
+        .editable-field {
+            border: 1px solid transparent;
+            padding: 4px 8px;
+            border-radius: 3px;
+            background: transparent;
+            font-size: 14px;
+            width: 100%;
+            min-width: 100px;
+        }
+
+        .editable-field:hover {
+            background: #f8f9fa;
+            border-color: #ddd;
+        }
+
+        .editable-field:focus {
+            outline: none;
+            border-color: #4CAF50;
+            background: white;
+        }
+
+        .date-field {
+            min-width: 130px;
+        }
+
+        .number-field {
+            min-width: 80px;
+        }
+
+        .edit-mode {
+            background: #fff3cd !important;
+            border-color: #ffc107 !important;
+        }
+
+        .save-indicator {
+            background: #d4edda !important;
+            border-color: #28a745 !important;
+        }
     </style>
 </head>
 <body>
@@ -211,11 +270,13 @@
 
             <div class="card">
                 <h2>Empresas Cadastradas</h2>
+                <p><strong>Instruções:</strong> Clique nos campos para editar diretamente. Pressione Enter ou clique fora para salvar.</p>
                 <table>
                     <thead>
                         <tr>
                             <th>Nome</th>
                             <th>Usuário</th>
+                            <th>Senha</th>
                             <th>Status</th>
                             <th>Dispositivos</th>
                             <th>Expira em</th>
@@ -265,7 +326,7 @@
         function showManagementArea() {
             document.getElementById('loginArea').classList.add('hidden');
             document.getElementById('managementArea').classList.remove('hidden');
-            loadCompanies(); // Carrega a lista de empresas
+            loadCompanies();
         }
     
         function startSessionTimer() {
@@ -281,7 +342,7 @@
                 document.getElementById('timer').textContent = 
                     `Sessão expira em: ${minutes}m ${seconds}s`;
     
-                if (remaining <= 300000 && remaining > 0) { // 5 minutos
+                if (remaining <= 300000 && remaining > 0) {
                     document.getElementById('timer').style.color = '#dc3545';
                 }
     
@@ -291,71 +352,46 @@
             }, 1000);
         }
     
-// Função de login atualizada para o frontend
-async function login() {
-    const username = document.getElementById('username').value;
-    const password = document.getElementById('password').value;
+        async function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
 
-    try {
-        const response = await fetch('/api/login', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ 
-                username, 
-                password,
-                type: 'superadmin'  // Sempre incluindo o type
-            })
-        });
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ 
+                        username, 
+                        password,
+                        type: 'superadmin'
+                    })
+                });
 
-        const data = await response.json();
-        
-        if (data.success && data.token) {
-            localStorage.setItem('authToken', data.token);
-            localStorage.setItem('userRole', data.role); // Salva o role também
-            window.location.href = '/superadmin';
-        } else {
-            throw new Error(data.message || 'Credenciais inválidas');
+                const data = await response.json();
+                
+                if (data.success && data.token) {
+                    localStorage.setItem('authToken', data.token);
+                    localStorage.setItem('userRole', data.role);
+                    window.location.href = '/superadmin';
+                } else {
+                    throw new Error(data.message || 'Credenciais inválidas');
+                }
+            } catch (error) {
+                console.error('Erro no login:', error);
+                alert(error.message || 'Erro ao fazer login');
+            }
         }
-    } catch (error) {
-        console.error('Erro no login:', error);
-        alert(error.message || 'Erro ao fazer login');
-    }
-}
 
-// Função para verificar autenticação
-function checkAuth() {
-    const token = localStorage.getItem('authToken');
-    if (!token) {
-        showLoginArea();
-        return;
-    }
-
-    try {
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        if (payload.exp * 1000 < Date.now()) {
-            logout();
-            return;
+        function logout() {
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('userRole');
+            if (sessionInterval) {
+                clearInterval(sessionInterval);
+            }
+            window.location.href = '/';
         }
-        tokenExpiration = payload.exp * 1000;
-        showManagementArea();
-        startSessionTimer();
-    } catch (error) {
-        console.error('Erro ao verificar token:', error);
-        logout();
-    }
-}
-
-// Função de logout
-function logout() {
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('userRole');
-    if (sessionInterval) {
-        clearInterval(sessionInterval);
-    }
-    window.location.href = '/';
-}
     
         // Funções de gerenciamento de empresas
         async function loadCompanies() {
@@ -374,13 +410,51 @@ function logout() {
                     data.companies.forEach(company => {
                         const row = document.createElement('tr');
                         row.innerHTML = `
-                            <td>${company.name || '-'}</td>
-                            <td>${company.username || '-'}</td>
+                            <td>
+                                <input type="text" class="editable-field" 
+                                       value="${company.name || ''}" 
+                                       data-company-id="${company._id}" 
+                                       data-field="name"
+                                       onblur="saveField(this)" 
+                                       onkeypress="handleEnter(event, this)">
+                            </td>
+                            <td>
+                                <input type="text" class="editable-field" 
+                                       value="${company.username || ''}" 
+                                       data-company-id="${company._id}" 
+                                       data-field="username"
+                                       onblur="saveField(this)" 
+                                       onkeypress="handleEnter(event, this)">
+                            </td>
+                            <td>
+                                <input type="password" class="editable-field" 
+                                       placeholder="Nova senha..." 
+                                       data-company-id="${company._id}" 
+                                       data-field="password"
+                                       onblur="saveField(this)" 
+                                       onkeypress="handleEnter(event, this)">
+                            </td>
                             <td class="status-${company.isActive ? 'active' : 'inactive'}">
                                 ${company.isActive ? 'Ativo' : 'Inativo'}
                             </td>
-                            <td>${company.deviceCount || 0} / ${company.maxDevices}</td>
-                            <td>${new Date(company.expirationDate).toLocaleDateString()}</td>
+                            <td>
+                                <input type="number" class="editable-field number-field" 
+                                       value="${company.maxDevices || 0}" 
+                                       data-company-id="${company._id}" 
+                                       data-field="maxDevices"
+                                       min="1"
+                                       onblur="saveField(this)" 
+                                       onkeypress="handleEnter(event, this)">
+                                <span style="font-size: 12px; color: #666;"> (${company.deviceCount || 0} ativos)</span>
+                            </td>
+                            <td>
+                                <input type="date" class="editable-field date-field" 
+                                       value="${new Date(company.expirationDate).toISOString().split('T')[0]}" 
+                                       data-company-id="${company._id}" 
+                                       data-field="expirationDate"
+                                       onblur="saveField(this)" 
+                                       onkeypress="handleEnter(event, this)">
+                            </td>
                             <td class="action-buttons">
                                 <button onclick="toggleCompany('${company._id}')" class="btn-${company.isActive ? 'danger' : 'primary'}">
                                     ${company.isActive ? 'Desativar' : 'Ativar'}
@@ -399,6 +473,98 @@ function logout() {
             } catch (error) {
                 console.error('Erro:', error);
                 alert('Erro ao carregar empresas');
+            }
+        }
+
+        // Nova função para salvar campo editado
+        async function saveField(inputElement) {
+            const companyId = inputElement.dataset.companyId;
+            const field = inputElement.dataset.field;
+            const value = inputElement.value.trim();
+
+            // Se for senha e estiver vazio, não salva
+            if (field === 'password' && value === '') {
+                return;
+            }
+
+            // Confirma alteração
+            if (!confirm(`Confirma a alteração do campo "${getFieldDisplayName(field)}"?`)) {
+                // Se cancelar, restaura o valor original
+                if (field !== 'password') {
+                    inputElement.blur();
+                }
+                return;
+            }
+
+            // Marca como salvando
+            inputElement.classList.add('edit-mode');
+
+            try {
+                const updateData = {};
+                updateData[field] = value;
+
+                const response = await fetch(`/api/companies/${companyId}/update-field`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+                    },
+                    body: JSON.stringify(updateData)
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Indica sucesso
+                    inputElement.classList.remove('edit-mode');
+                    inputElement.classList.add('save-indicator');
+                    
+                    // Remove indicador após 2 segundos
+                    setTimeout(() => {
+                        inputElement.classList.remove('save-indicator');
+                    }, 2000);
+
+                    // Se alterou senha, limpa o campo
+                    if (field === 'password') {
+                        inputElement.value = '';
+                        inputElement.placeholder = 'Senha alterada!';
+                        setTimeout(() => {
+                            inputElement.placeholder = 'Nova senha...';
+                        }, 3000);
+                    }
+
+                    // Se mudou status, recarrega a lista
+                    if (field === 'username') {
+                        setTimeout(() => loadCompanies(), 1000);
+                    }
+                } else {
+                    throw new Error(data.message);
+                }
+            } catch (error) {
+                inputElement.classList.remove('edit-mode');
+                alert(error.message || 'Erro ao salvar alteração');
+                
+                // Restaura valor original se houver erro
+                if (field !== 'password') {
+                    loadCompanies();
+                }
+            }
+        }
+
+        function getFieldDisplayName(field) {
+            const names = {
+                'name': 'Nome da Empresa',
+                'username': 'Usuário',
+                'password': 'Senha',
+                'maxDevices': 'Limite de Dispositivos',
+                'expirationDate': 'Data de Expiração'
+            };
+            return names[field] || field;
+        }
+
+        function handleEnter(event, inputElement) {
+            if (event.key === 'Enter') {
+                inputElement.blur();
             }
         }
     
@@ -428,7 +594,6 @@ function logout() {
                 const data = await response.json();
                 
                 if (data.success) {
-                    // Limpa formulário
                     document.getElementById('companyName').value = '';
                     document.getElementById('companyUsername').value = '';
                     document.getElementById('companyPassword').value = '';
@@ -524,7 +689,7 @@ function logout() {
             }
         }
     
-        // Adiciona handler de tecla Enter no login
+        // Handler de tecla Enter no login
         document.getElementById('password').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
                 login();
