@@ -43,7 +43,8 @@ const syncSchema = new mongoose.Schema({
     originalName: { type: String, required: true },
     fileSize: { type: Number, required: true },
     timestamp: { type: Date, default: Date.now },
-    status: { type: String, enum: ['pending', 'completed', 'error'], default: 'completed' }
+    status: { type: String, enum: ['pending', 'completed', 'error'], default: 'completed' },
+    conteudo: { type: String, default: '' } // NOVO: texto do CSV exportado pelo coletor
 });
 
 const SyncLog = mongoose.model('SyncLog', syncSchema);
@@ -58,27 +59,15 @@ const loadSchema = new mongoose.Schema({
     uploadDate: { type: Date, default: Date.now },
     isActive: { type: Boolean, default: true },
     version: { type: String, required: true },
-    fileSize: { type: Number, default: 0 }
+    fileSize: { type: Number, default: 0 },
+    conteudo: { type: String, default: '' } // NOVO: o texto do CSV guardado no banco
 });
 
 const Load = mongoose.model('Load', loadSchema);
 
-// CONFIGURAÇÃO DO MULTER PARA UPLOAD DE ARQUIVOS
-const storage = multer.diskStorage({
-    destination: async (req, file, cb) => {
-        const dir = path.join(__dirname, 'uploads', req.user.companyId.toString());
-        try {
-            await fs.mkdir(dir, { recursive: true });
-            cb(null, dir);
-        } catch (error) {
-            cb(error);
-        }
-    },
-    filename: (req, file, cb) => {
-        const timestamp = new Date().toISOString().replace(/:/g, '-').split('.')[0];
-        cb(null, `${timestamp}_${file.originalname}`);
-    }
-});
+// CONFIGURAÇÃO DO MULTER — memória (o conteúdo vai para o MongoDB, não para o disco).
+// Isso resolve o sumiço de arquivos quando o Render reinicia.
+const storage = multer.memoryStorage();
 
 const upload = multer({ 
     storage,
@@ -748,79 +737,78 @@ app.post('/api/mobile/login', async (req, res) => {
 
 // ENDPOINTS DE SINCRONIZAÇÃO PARA APP (aceita token admin)
 
-// 1. UPLOAD DE DADOS COLETADOS (aceita token admin) - CORRIGIDO
+// 1. UPLOAD (aceita token admin) — carga do admin OU exportação do coletor
 app.post('/api/app/sync/upload', auth, upload.single('file'), async (req, res) => {
     try {
         if (!req.file) {
             return res.status(400).json({ success: false, message: 'Arquivo não fornecido' });
         }
 
-        // NOVO: Determinar tipo baseado no nome do arquivo
-        let type = 'parametros'; // padrão
-        let description = req.file.originalname;
-        
-        if (req.file.originalname.toLowerCase().includes('ua_') || 
-            req.file.originalname.toLowerCase().includes('parcela')) {
-            type = 'parcelas';
-            description = `Parcelas - ${req.file.originalname}`;
-        } else if (req.file.originalname.toLowerCase().includes('cub_') || 
-                   req.file.originalname.toLowerCase().includes('cubagem')) {
-            type = 'cubagem';
-            description = `Cubagem - ${req.file.originalname}`;
-        } else if (req.file.originalname.toLowerCase().includes('param')) {
-            type = 'parametros';
-            description = `Parâmetros - ${req.file.originalname}`;
+        const conteudoCsv = req.file.buffer.toString('utf-8'); // o texto do CSV
+        const isAdminUpload = req.body.type && req.body.version;
+
+        if (isAdminUpload) {
+            // Carga para dispositivos
+            const { type, description, version } = req.body;
+            const load = new Load({
+                companyId: req.user.companyId,
+                type,
+                filename: `${type}_${version}_${Date.now()}.csv`,
+                originalName: req.file.originalname,
+                description,
+                uploadedBy: 'Admin',
+                version,
+                fileSize: req.file.size,
+                conteudo: conteudoCsv // guarda no banco
+            });
+            await load.save();
+            res.json({ success: true, message: 'Carga enviada com sucesso', loadId: load._id });
+        } else {
+            // Exportação do coletor
+            const androidId = req.body.androidId || 'admin-device';
+            const syncLog = new SyncLog({
+                companyId: req.user.companyId,
+                androidId,
+                type: 'upload',
+                filename: `${Date.now()}_${req.file.originalname}`,
+                originalName: req.file.originalname,
+                fileSize: req.file.size,
+                conteudo: conteudoCsv // guarda no banco
+            });
+            await syncLog.save();
+            res.json({ success: true, message: 'Dados exportados enviados com sucesso', uploadId: syncLog._id });
         }
+    } catch (error) {
+        console.error('ERRO no upload:', error);
+        res.status(500).json({ success: false, message: 'Erro no upload: ' + error.message });
+    }
+});
 
-        // Para token admin, pega o androidId do body ou usa um padrão
-        const androidId = req.body.androidId || 'admin-device';
-
-        // NOVO: Mover arquivo para pasta loads e registrar como Load
-        const loadDir = path.join(__dirname, 'loads', req.user.companyId.toString());
-        await fs.mkdir(loadDir, { recursive: true });
-        
-        const newFilename = req.file.filename; // Mantém o nome com timestamp
-        const newPath = path.join(loadDir, newFilename);
-        
-        // Move de uploads/ para loads/
-        await fs.rename(req.file.path, newPath);
-
-        // Registra como Load no banco para aparecer na lista
+// NOVO: rota que o PORTAL usa para enviar carga (antes não existia -> dava 404)
+app.post('/api/admin/loads/upload', auth, checkLicense, upload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: 'Arquivo não fornecido' });
+        }
+        const { type, description, version } = req.body;
+        if (!type || !version) {
+            return res.status(400).json({ success: false, message: 'Tipo e versão são obrigatórios' });
+        }
         const load = new Load({
             companyId: req.user.companyId,
             type,
-            filename: newFilename,
+            filename: `${type}_${version}_${Date.now()}.csv`,
             originalName: req.file.originalname,
             description,
-            uploadedBy: 'Mobile App',
-            version: new Date().toISOString().split('T')[0], // Data como versão
-            fileSize: req.file.size
+            uploadedBy: 'Admin',
+            version,
+            fileSize: req.file.size,
+            conteudo: req.file.buffer.toString('utf-8')
         });
-
         await load.save();
-
-        // Registra o log de sync
-        const syncLog = new SyncLog({
-            companyId: req.user.companyId,
-            androidId: androidId,
-            type: 'upload',
-            filename: newFilename,
-            originalName: req.file.originalname,
-            fileSize: req.file.size
-        });
-
-        await syncLog.save();
-
-        res.json({
-            success: true,
-            message: 'Dados enviados com sucesso',
-            uploadId: syncLog._id,
-            loadId: load._id,
-            timestamp: syncLog.timestamp
-        });
-
+        res.json({ success: true, message: 'Carga enviada com sucesso', loadId: load._id });
     } catch (error) {
-        console.error('Erro no upload:', error);
+        console.error('ERRO no upload do portal:', error);
         res.status(500).json({ success: false, message: 'Erro no upload: ' + error.message });
     }
 });
@@ -866,16 +854,13 @@ app.get('/api/app/sync/download/:loadId', auth, checkLicense, async (req, res) =
             return res.status(404).json({ success: false, message: 'Carga não encontrada' });
         }
 
-        const filePath = path.join(__dirname, 'loads', req.user.companyId.toString(), load.filename);
-        
-        try {
-            await fs.access(filePath);
-        } catch {
-            return res.status(404).json({ success: false, message: 'Arquivo não encontrado no servidor' });
+        // NOVO: serve o conteúdo direto do MongoDB
+        if (!load.conteudo) {
+            return res.status(404).json({ success: false, message: 'Conteúdo da carga não encontrado' });
         }
 
         // Para token admin, usa um androidId padrão
-        const androidId = req.body.androidId || 'admin-device';
+        const androidId = req.query.androidId || req.headers['x-android-id'] || 'admin-device';
 
         const syncLog = new SyncLog({
             companyId: req.user.companyId,
@@ -889,8 +874,8 @@ app.get('/api/app/sync/download/:loadId', auth, checkLicense, async (req, res) =
         await syncLog.save();
 
         res.setHeader('Content-Disposition', `attachment; filename="${load.originalName}"`);
-        res.setHeader('Content-Type', 'text/csv');
-        res.sendFile(filePath);
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.send(load.conteudo);
 
     } catch (error) {
         console.error('Erro no download:', error);
@@ -935,7 +920,7 @@ app.post('/api/mobile/sync/upload', mobileAuth, upload.single('file'), async (re
 });
 
 // 2. LISTAR CARGAS DISPONÍVEIS (para o app)
-app.get('/api/mobile/sync/loads', mobileAuth, async (req, res) => {
+app.get('/api/mobile/sync/loads', mobileAuth, checkLicense, async (req, res) => {
     try {
         const loads = await Load.find({
             companyId: req.user.companyId,
@@ -963,7 +948,7 @@ app.get('/api/mobile/sync/loads', mobileAuth, async (req, res) => {
 });
 
 // 3. DOWNLOAD DE CARGA (do servidor para app)
-app.get('/api/mobile/sync/download/:loadId', mobileAuth, async (req, res) => {
+app.get('/api/mobile/sync/download/:loadId', mobileAuth, checkLicense, async (req, res) => {
     try {
         const load = await Load.findOne({
             _id: req.params.loadId,
@@ -1007,61 +992,7 @@ app.get('/api/mobile/sync/download/:loadId', mobileAuth, async (req, res) => {
     }
 });
 
-// 4. UPLOAD DE CARGAS (admin para servidor)
-app.post('/api/admin/loads/upload', auth, checkLicense, upload.single('file'), async (req, res) => {
-    try {
-        if (!req.file) {
-            return res.status(400).json({ success: false, message: 'Arquivo não fornecido' });
-        }
 
-        const { type, description, version } = req.body;
-
-        if (!type || !['parcelas', 'parametros'].includes(type)) {
-            return res.status(400).json({ success: false, message: 'Tipo inválido' });
-        }
-
-        if (!version) {
-            return res.status(400).json({ success: false, message: 'Versão é obrigatória' });
-        }
-
-        const loadDir = path.join(__dirname, 'loads', req.user.companyId.toString());
-        await fs.mkdir(loadDir, { recursive: true });
-        
-        const newFilename = `${type}_${version}_${Date.now()}.csv`;
-        const newPath = path.join(loadDir, newFilename);
-        
-        await fs.rename(req.file.path, newPath);
-
-        const load = new Load({
-            companyId: req.user.companyId,
-            type,
-            filename: newFilename,
-            originalName: req.file.originalname,
-            description,
-            uploadedBy: req.company.username,
-            version,
-            fileSize: req.file.size
-        });
-
-        await load.save();
-
-        res.json({
-            success: true,
-            message: 'Carga enviada com sucesso',
-            load: {
-                id: load._id,
-                type: load.type,
-                description: load.description,
-                version: load.version,
-                uploadDate: load.uploadDate
-            }
-        });
-
-    } catch (error) {
-        console.error('Erro no upload da carga:', error);
-        res.status(500).json({ success: false, message: 'Erro no upload: ' + error.message });
-    }
-});
 
 // 5. LISTAR CARGAS (para admin)
 app.get('/api/admin/loads', auth, checkLicense, async (req, res) => {
@@ -1147,36 +1078,6 @@ app.get('/api/admin/sync/history', auth, checkLicense, async (req, res) => {
     }
 });
 
-// 8. BAIXAR DADOS COLETADOS (admin)
-app.get('/api/admin/sync/download/:syncId', auth, checkLicense, async (req, res) => {
-    try {
-        const syncLog = await SyncLog.findOne({
-            _id: req.params.syncId,
-            companyId: req.user.companyId,
-            type: 'upload'
-        });
-
-        if (!syncLog) {
-            return res.status(404).json({ success: false, message: 'Arquivo não encontrado' });
-        }
-
-        const filePath = path.join(__dirname, 'uploads', req.user.companyId.toString(), syncLog.filename);
-        
-        try {
-            await fs.access(filePath);
-        } catch {
-            return res.status(404).json({ success: false, message: 'Arquivo não encontrado no servidor' });
-        }
-
-        res.setHeader('Content-Disposition', `attachment; filename="${syncLog.originalName}"`);
-        res.setHeader('Content-Type', 'text/csv');
-        res.sendFile(filePath);
-
-    } catch (error) {
-        console.error('Erro no download:', error);
-        res.status(500).json({ success: false, message: 'Erro no download: ' + error.message });
-    }
-});
 
 // 9. EXCLUIR CARGA
 app.delete('/api/admin/loads/:loadId', auth, checkLicense, async (req, res) => {
@@ -1213,6 +1114,33 @@ app.delete('/api/admin/loads/:loadId', auth, checkLicense, async (req, res) => {
     }
 });
 
+// NOVA ROTA: Download de exportações do coletor
+app.get('/api/admin/sync/download/:syncId', auth, checkLicense, async (req, res) => {
+    try {
+        const syncLog = await SyncLog.findOne({
+            _id: req.params.syncId,
+            companyId: req.user.companyId,
+            type: 'upload'
+        });
+
+        if (!syncLog) {
+            return res.status(404).json({ success: false, message: 'Exportação não encontrada' });
+        }
+
+        if (!syncLog.conteudo) {
+            return res.status(404).json({ success: false, message: 'Conteúdo da exportação não encontrado' });
+        }
+
+        res.setHeader('Content-Disposition', `attachment; filename="${syncLog.originalName}"`);
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.send(syncLog.conteudo);
+
+    } catch (error) {
+        console.error('Erro no download da exportação:', error);
+        res.status(500).json({ success: false, message: 'Erro no download: ' + error.message });
+    }
+});
+
 // DEBUG: Verificar arquivos na pasta loads
 app.get('/api/debug/loads/:companyId', auth, async (req, res) => {
     try {
@@ -1236,6 +1164,60 @@ app.get('/api/debug/loads/:companyId', auth, async (req, res) => {
         }
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// DEBUG: Verificar onde está o arquivo da exportação
+app.get('/api/debug/find-file/:syncId', auth, async (req, res) => {
+    try {
+        const syncLog = await SyncLog.findOne({
+            _id: req.params.syncId,
+            companyId: req.user.companyId
+        });
+
+        if (!syncLog) {
+            return res.json({ error: 'SyncLog não encontrado' });
+        }
+
+        const companyDir = req.user.companyId.toString();
+        
+        // Verifica uploads/
+        const uploadsPath = path.join(__dirname, 'uploads', companyDir, syncLog.filename);
+        let uploadsExists = false;
+        try {
+            await fs.access(uploadsPath);
+            uploadsExists = true;
+        } catch (e) {}
+
+        // Verifica loads/
+        const loadsPath = path.join(__dirname, 'loads', companyDir, syncLog.filename);
+        let loadsExists = false;
+        try {
+            await fs.access(loadsPath);
+            loadsExists = true;
+        } catch (e) {}
+
+        res.json({
+            syncLog: {
+                id: syncLog._id,
+                filename: syncLog.filename,
+                originalName: syncLog.originalName,
+                timestamp: syncLog.timestamp
+            },
+            paths: {
+                uploads: {
+                    path: uploadsPath,
+                    exists: uploadsExists
+                },
+                loads: {
+                    path: loadsPath,
+                    exists: loadsExists
+                }
+            }
+        });
+
+    } catch (error) {
+        res.json({ error: error.message });
     }
 });
 

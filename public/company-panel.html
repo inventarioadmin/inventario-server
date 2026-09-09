@@ -1,627 +1,396 @@
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel da Empresa</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GreenSnap — Painel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --mata:#1f3d2b;        /* verde mata escuro */
+    --mata-2:#2e5a3f;      /* verde médio */
+    --folha:#4f8a5b;       /* verde folha */
+    --terra:#8a6d3b;       /* marrom terra (acento pontual) */
+    --papel:#f6f4ee;       /* papel de caderno */
+    --papel-2:#ece7dc;     /* papel sombreado */
+    --linha:#d8d2c4;       /* linha de caderno */
+    --tinta:#20241f;       /* tinta quase preta esverdeada */
+    --tinta-3:#5c6357;     /* tinta clara */
+    --verde:#2e7d46; --azul:#2563a8; --vermelho:#b0413a; --amarelo:#c99a2e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--papel);color:var(--tinta);
+       font-family:Inter,system-ui,sans-serif;font-size:15px;line-height:1.5}
+  h1,h2,h3{font-family:Fraunces,Georgia,serif;font-weight:600;letter-spacing:-.01em;margin:0}
+  a{color:var(--mata-2)}
+
+  /* Cabeçalho */
+  .topo{background:var(--mata);color:var(--papel);padding:18px 28px;
+        display:flex;justify-content:space-between;align-items:center}
+  .marca{display:flex;align-items:baseline;gap:10px}
+  .marca h1{font-size:22px;color:var(--papel)}
+  .marca span{font-size:13px;color:#a9c3b0}
+  .sair{background:transparent;border:1px solid #5c7a63;color:var(--papel);
+        padding:7px 16px;border-radius:6px;cursor:pointer;font-size:14px}
+  .sair:hover{background:#2e5a3f}
+
+  .wrap{max-width:1080px;margin:0 auto;padding:24px 28px 60px}
+
+  /* Faixa de informações da empresa */
+  .empresa{display:grid;grid-template-columns:1fr auto auto;gap:28px;align-items:center;
+           background:var(--mata-2);color:var(--papel);border-radius:10px;
+           padding:18px 24px;margin-bottom:8px}
+  .empresa .nome{font-family:Fraunces,serif;font-size:20px}
+  .empresa .metrica{text-align:right}
+  .empresa .metrica b{display:block;font-size:22px;font-weight:600}
+  .empresa .metrica small{color:#b6cdbc;font-size:12px}
+  #warningArea:empty{display:none}
+  .aviso{background:var(--amarelo);color:#3a2c07;padding:10px 16px;border-radius:8px;
+         margin-bottom:18px;font-size:14px}
+
+  /* Abas */
+  .abas{display:flex;gap:2px;margin:22px 0 0}
+  .aba{background:none;border:none;border-bottom:2px solid transparent;
+       padding:10px 18px;font-size:15px;color:var(--tinta-3);cursor:pointer;font-weight:500}
+  .aba.on{color:var(--mata);border-bottom-color:var(--folha);font-weight:600}
+  .painel{display:none;padding-top:22px}
+  .painel.on{display:block}
+
+  /* Cartões e seções */
+  .secao{background:#fff;border:1px solid var(--linha);border-radius:10px;
+         padding:22px 24px;margin-bottom:20px}
+  .secao h3{font-size:17px;margin-bottom:16px;color:var(--mata)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  @media(max-width:820px){.grid2{grid-template-columns:1fr}.empresa{grid-template-columns:1fr}}
+
+  label{display:block;font-size:13px;color:var(--tinta-3);margin:0 0 5px}
+  input,select{width:100%;padding:9px 11px;border:1px solid var(--linha);border-radius:7px;
+               font-size:14px;font-family:inherit;background:var(--papel);color:var(--tinta)}
+  input:focus,select:focus{outline:2px solid var(--folha);outline-offset:-1px;border-color:var(--folha)}
+  .campo{margin-bottom:14px}
+  .btn{background:var(--mata-2);color:#fff;border:none;padding:10px 18px;border-radius:7px;
+       cursor:pointer;font-size:14px;font-weight:500;font-family:inherit}
+  .btn:hover{background:var(--mata)}
+  .btn:disabled{opacity:.6;cursor:default}
+  .btn-full{width:100%}
+  .btn-sm{padding:5px 11px;font-size:13px;border-radius:6px}
+  .btn-ghost{background:none;border:1px solid var(--linha);color:var(--tinta)}
+  .btn-perigo{background:none;border:1px solid var(--vermelho);color:var(--vermelho)}
+  .btn-perigo:hover{background:var(--vermelho);color:#fff}
+
+  /* Tabela */
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{text-align:left;font-weight:600;color:var(--tinta-3);font-size:12px;
+     padding:8px 10px;border-bottom:2px solid var(--linha)}
+  td{padding:10px;border-bottom:1px solid var(--papel-2);vertical-align:middle}
+  tr:hover td{background:var(--papel)}
+  .selo{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:600}
+  .selo.ok{background:#e2efe4;color:var(--verde)}
+  .selo.off{background:#f2dede;color:var(--vermelho)}
+  .selo.up{background:#e6eef7;color:var(--azul)}
+  .selo.down{background:#e2efe4;color:var(--verde)}
+  .vazio{color:var(--tinta-3);text-align:center;padding:26px}
+
+  /* Lista de cargas */
+  .carga{border:1px solid var(--linha);border-radius:8px;padding:12px 14px;margin-bottom:10px;
+         display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+  .carga .tit{font-weight:600;font-size:14px}
+  .carga small{color:var(--tinta-3);font-size:12px}
+  .pill{font-size:11px;padding:2px 8px;border-radius:5px;background:var(--papel-2);color:var(--tinta-3)}
+</style>
 </head>
-<body class="bg-light">
-    <div class="container mt-4">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <h3>Painel da Empresa</h3>
-            <button onclick="logout()" class="btn btn-danger">Sair</button>
+<body>
+
+<div class="topo">
+  <div class="marca"><h1>GreenSnap</h1><span>painel da empresa</span></div>
+  <button class="sair" onclick="logout()">Sair</button>
+</div>
+
+<div class="wrap">
+
+  <div class="empresa">
+    <div class="nome" id="companyName">—</div>
+    <div class="metrica"><b><span id="deviceCount">0</span>/<span id="maxDevices">0</span></b><small>dispositivos</small></div>
+    <div class="metrica"><b id="licenseExpiration">—</b><small>validade</small></div>
+  </div>
+  <div id="warningArea"></div>
+
+  <div class="abas">
+    <button class="aba on" data-alvo="pDispositivos">Dispositivos</button>
+    <button class="aba" data-alvo="pSync">Cargas &amp; Sincronização</button>
+  </div>
+
+  <!-- DISPOSITIVOS -->
+  <div class="painel on" id="pDispositivos">
+    <div class="secao">
+      <h3>Registrar dispositivo</h3>
+      <form id="deviceForm">
+        <div class="grid2">
+          <div class="campo"><label for="androidId">ID Android</label>
+            <input id="androidId" required placeholder="cole o ID do aparelho"></div>
+          <div class="campo"><label for="description">Descrição</label>
+            <input id="description" required placeholder="ex: Celular do Paulo"></div>
         </div>
-
-        <!-- Navegação por abas -->
-        <ul class="nav nav-tabs" id="mainTabs" role="tablist">
-            <li class="nav-item" role="presentation">
-                <button class="nav-link active" id="devices-tab" data-bs-toggle="tab" data-bs-target="#devices" type="button" role="tab">
-                    <i class="fas fa-mobile-alt"></i> Dispositivos
-                </button>
-            </li>
-            <li class="nav-item" role="presentation">
-                <button class="nav-link" id="sync-tab" data-bs-toggle="tab" data-bs-target="#sync" type="button" role="tab">
-                    <i class="fas fa-sync-alt"></i> Sincronização
-                </button>
-            </li>
-        </ul>
-
-        <div class="tab-content" id="mainTabsContent">
-            <!-- Aba Dispositivos (MANTÉM TUDO IGUAL) -->
-            <div class="tab-pane fade show active" id="devices" role="tabpanel">
-                <div class="card shadow mt-3">
-                    <div class="card-body">
-                        <!-- Info da Empresa -->
-                        <div class="mb-4 p-3 bg-light rounded">
-                            <h4>Informações da Empresa</h4>
-                            <div class="row">
-                                <div class="col-md-4">
-                                    <p class="mb-2">Dispositivos: <span id="deviceCount">0</span>/<span id="maxDevices">0</span></p>
-                                </div>
-                                <div class="col-md-4">
-                                    <p class="mb-2">Validade: <span id="licenseExpiration">-</span></p>
-                                </div>
-                                <div class="col-md-4">
-                                    <div id="warningArea"></div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Registro de Dispositivo -->
-                        <h4>Registrar Novo Dispositivo</h4>
-                        <form id="deviceForm" class="mb-4">
-                            <div class="row">
-                                <div class="col-md-4">
-                                    <div class="mb-3">
-                                        <input type="text" class="form-control" id="androidId" placeholder="ID Android" required>
-                                    </div>
-                                </div>
-                                <div class="col-md-4">
-                                    <div class="mb-3">
-                                        <input type="text" class="form-control" id="description" placeholder="Descrição do Dispositivo" required>
-                                    </div>
-                                </div>
-                                <div class="col-md-4">
-                                    <div class="mb-3">
-                                        <button type="submit" class="btn btn-primary w-100">Registrar Dispositivo</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </form>
-
-                        <!-- Lista de Dispositivos -->
-                        <h4>Dispositivos Registrados</h4>
-                        <div class="table-responsive">
-                            <table class="table">
-                                <thead>
-                                    <tr>
-                                        <th>ID Android</th>
-                                        <th>Descrição</th>
-                                        <th>Status</th>
-                                        <th>Último Acesso</th>
-                                        <th>Última Sync</th>
-                                        <th>Ações</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="deviceList"></tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Nova Aba Sincronização -->
-            <div class="tab-pane fade" id="sync" role="tabpanel">
-                <div class="row mt-3">
-                    <!-- Upload de Cargas -->
-                    <div class="col-md-6">
-                        <div class="card">
-                            <div class="card-header bg-primary text-white">
-                                <h5><i class="fas fa-upload"></i> Enviar Cargas para Dispositivos</h5>
-                            </div>
-                            <div class="card-body">
-                                <form id="uploadForm">
-                                    <div class="mb-3">
-                                        <label for="loadType" class="form-label">Tipo de Carga</label>
-                                        <select class="form-select" id="loadType" required>
-                                            <option value="">Selecione...</option>
-                                            <option value="parcelas">Parcelas</option>
-                                            <option value="parametros">Parâmetros</option>
-                                        </select>
-                                    </div>
-                                    <div class="mb-3">
-                                        <label for="loadVersion" class="form-label">Versão</label>
-                                        <input type="text" class="form-control" id="loadVersion" placeholder="Ex: v1.0, 2025-01-15" required>
-                                    </div>
-                                    <div class="mb-3">
-                                        <label for="loadDescription" class="form-label">Descrição (opcional)</label>
-                                        <input type="text" class="form-control" id="loadDescription" placeholder="Descrição da carga">
-                                    </div>
-                                    <div class="mb-3">
-                                        <label for="loadFile" class="form-label">Arquivo CSV</label>
-                                        <input type="file" class="form-control" id="loadFile" accept=".csv" required>
-                                    </div>
-                                    <button type="submit" class="btn btn-primary w-100">
-                                        <i class="fas fa-upload"></i> Enviar Carga
-                                    </button>
-                                </form>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Cargas Disponíveis -->
-                    <div class="col-md-6">
-                        <div class="card">
-                            <div class="card-header bg-success text-white d-flex justify-content-between">
-                                <h5><i class="fas fa-list"></i> Cargas Disponíveis</h5>
-                                <button onclick="loadCargas()" class="btn btn-sm btn-light">
-                                    <i class="fas fa-refresh"></i>
-                                </button>
-                            </div>
-                            <div class="card-body" style="max-height: 400px; overflow-y: auto;">
-                                <div id="loadsList">
-                                    <p class="text-muted">Carregando...</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Histórico de Sincronização -->
-                <div class="card mt-4">
-                    <div class="card-header bg-info text-white d-flex justify-content-between">
-                        <h5><i class="fas fa-history"></i> Histórico de Sincronização</h5>
-                        <button onclick="loadSyncHistory()" class="btn btn-sm btn-light">
-                            <i class="fas fa-refresh"></i>
-                        </button>
-                    </div>
-                    <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-sm">
-                                <thead>
-                                    <tr>
-                                        <th>Data/Hora</th>
-                                        <th>Dispositivo</th>
-                                        <th>Tipo</th>
-                                        <th>Arquivo</th>
-                                        <th>Tamanho</th>
-                                        <th>Ações</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="syncHistoryList">
-                                    <tr><td colspan="6" class="text-center text-muted">Carregando...</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <button class="btn" type="submit">Registrar dispositivo</button>
+      </form>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // ===== MANTÉM TODAS AS FUNÇÕES EXISTENTES =====
-        
-        // Verificação inicial de autenticação
-        function checkAuth() {
-            const token = localStorage.getItem('authToken');
-            if (!token) {
-                window.location.href = '/';
-                return false;
-            }
-            return true;
-        }
+    <div class="secao">
+      <h3>Dispositivos registrados</h3>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>ID Android</th><th>Descrição</th><th>Status</th>
+            <th>Último acesso</th><th>Última sync</th><th>Ações</th>
+          </tr></thead>
+          <tbody id="deviceList"><tr><td colspan="6" class="vazio">Carregando…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 
-        // Função para carregar informações da empresa
-        async function loadCompanyInfo() {
-            if (!checkAuth()) return;
+  <!-- SYNC -->
+  <div class="painel" id="pSync">
+    <div class="grid2">
+      <div class="secao">
+        <h3>Enviar carga para os dispositivos</h3>
+        <form id="uploadForm">
+          <div class="campo"><label for="loadType">Tipo</label>
+            <select id="loadType" required>
+              <option value="">Selecione…</option>
+              <option value="parcelas">Parcelas</option>
+              <option value="parametros">Parâmetros</option>
+            </select></div>
+          <div class="campo"><label for="loadVersion">Versão / identificação</label>
+            <input id="loadVersion" required placeholder="ex: Frente A - Equipe 1"></div>
+          <div class="campo"><label for="loadDescription">Descrição (opcional)</label>
+            <input id="loadDescription" placeholder="ex: IFC Klabin 2026"></div>
+          <div class="campo"><label for="loadFile">Arquivo CSV</label>
+            <input id="loadFile" type="file" accept=".csv" required></div>
+          <button class="btn btn-full" type="submit">Enviar carga</button>
+        </form>
+      </div>
 
-            try {
-                const response = await fetch('/api/company/info', {
-                    headers: {
-                        'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-                    }
-                });
+      <div class="secao">
+        <h3 style="display:flex;justify-content:space-between;align-items:center">
+          Cargas disponíveis
+          <button class="btn btn-sm btn-ghost" onclick="loadCargas()">Atualizar</button>
+        </h3>
+        <div id="loadsList" style="max-height:420px;overflow-y:auto">
+          <p class="vazio">Carregando…</p>
+        </div>
+      </div>
+    </div>
 
-                if (response.status === 401) {
-                    logout();
-                    return;
-                }
+    <div class="secao">
+      <h3 style="display:flex;justify-content:space-between;align-items:center">
+        Exportações recebidas dos coletores
+        <button class="btn btn-sm btn-ghost" onclick="loadSyncHistory()">Atualizar</button>
+      </h3>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>Data/hora</th><th>Dispositivo</th><th>Tipo</th>
+            <th>Arquivo</th><th>Tamanho</th><th>Ações</th>
+          </tr></thead>
+          <tbody id="syncHistoryList"><tr><td colspan="6" class="vazio">Carregando…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
 
-                const data = await response.json();
-                if (data.success) {
-                    document.getElementById('deviceCount').textContent = data.company.deviceCount || '0';
-                    document.getElementById('maxDevices').textContent = data.company.maxDevices || '0';
-                    document.getElementById('licenseExpiration').textContent = 
-                        data.company.expirationDate ? new Date(data.company.expirationDate).toLocaleDateString() : '-';
-                }
-            } catch (error) {
-                console.error('Erro ao carregar info:', error);
-            }
-        }
+<script>
+const TOKEN = () => localStorage.getItem('authToken');
+const H = () => ({ 'Authorization': 'Bearer ' + TOKEN() });
 
-        // Função para carregar dispositivos (ATUALIZADA com informação de sync)
-        async function loadDevices() {
-            if (!checkAuth()) return;
+function checkAuth(){ if(!TOKEN()){ location.href='/'; return false; } return true; }
+function logout(){ localStorage.removeItem('authToken'); location.href='/'; }
 
-            try {
-                const response = await fetch('/api/devices/list', {
-                    headers: {
-                        'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-                    }
-                });
+// Abas
+document.querySelectorAll('.aba').forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll('.aba').forEach(x=>x.classList.remove('on'));
+    document.querySelectorAll('.painel').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    document.getElementById(b.dataset.alvo).classList.add('on');
+    if(b.dataset.alvo==='pSync'){ loadCargas(); loadSyncHistory(); }
+  };
+});
 
-                if (response.status === 401) {
-                    logout();
-                    return;
-                }
+async function loadCompanyInfo(){
+  if(!checkAuth()) return;
+  try{
+    const r = await fetch('/api/company/info',{headers:H()});
+    if(r.status===401) return logout();
+    const d = await r.json();
+    if(d.success){
+      document.getElementById('companyName').textContent = d.company.name || 'Empresa';
+      document.getElementById('deviceCount').textContent = d.company.deviceCount ?? 0;
+      document.getElementById('maxDevices').textContent = d.company.maxDevices ?? 0;
+      const exp = d.company.expirationDate ? new Date(d.company.expirationDate) : null;
+      document.getElementById('licenseExpiration').textContent =
+        exp ? exp.toLocaleDateString('pt-BR') : '—';
+      const wa = document.getElementById('warningArea');
+      if(exp){
+        const dias = Math.ceil((exp - new Date())/86400000);
+        wa.innerHTML = dias <= 15
+          ? `<div class="aviso">Licença vence em ${dias} dia(s). Renove para evitar interrupção.</div>` : '';
+      }
+    }
+  }catch(e){ console.error(e); }
+}
 
-                const data = await response.json();
-                if (data.success && data.devices) {
-                    const tbody = document.getElementById('deviceList');
-                    tbody.innerHTML = data.devices.map(device => `
-                        <tr>
-                            <td>${device.androidId}</td>
-                            <td>${device.description}</td>
-                            <td>
-                                <span class="badge ${device.isActive ? 'bg-success' : 'bg-danger'}">
-                                    ${device.isActive ? 'Ativo' : 'Inativo'}
-                                </span>
-                            </td>
-                            <td>${device.lastAccess ? new Date(device.lastAccess).toLocaleString() : 'Nunca'}</td>
-                            <td>
-                                ${device.lastSync ? `
-                                    <small>
-                                        ${device.lastSync.type === 'upload' ? '📤' : '📥'} 
-                                        ${new Date(device.lastSync.timestamp).toLocaleDateString()}
-                                        <br><span class="text-muted">${device.lastSync.filename}</span>
-                                    </small>
-                                ` : '<span class="text-muted">-</span>'}
-                            </td>
-                            <td>
-                                <button 
-                                    onclick="toggleDevice('${device.androidId}')"
-                                    class="btn btn-sm ${device.isActive ? 'btn-danger' : 'btn-success'} me-2">
-                                    ${device.isActive ? 'Desativar' : 'Ativar'}
-                                </button>
-                                <button 
-                                    onclick="deleteDevice('${device.androidId}')"
-                                    class="btn btn-sm btn-danger">
-                                    Excluir
-                                </button>
-                            </td>
-                        </tr>
-                    `).join('');
-                }
-            } catch (error) {
-                console.error('Erro ao carregar dispositivos:', error);
-            }
-        }
+async function loadDevices(){
+  if(!checkAuth()) return;
+  try{
+    const r = await fetch('/api/devices/list',{headers:H()});
+    if(r.status===401) return logout();
+    const d = await r.json();
+    const tb = document.getElementById('deviceList');
+    if(d.success && d.devices.length){
+      tb.innerHTML = d.devices.map(dev=>`
+        <tr>
+          <td style="font-family:ui-monospace,monospace;font-size:12px">${dev.androidId}</td>
+          <td>${dev.description||''}</td>
+          <td><span class="selo ${dev.isActive?'ok':'off'}">${dev.isActive?'Ativo':'Inativo'}</span></td>
+          <td>${dev.lastAccess?new Date(dev.lastAccess).toLocaleString('pt-BR'):'Nunca'}</td>
+          <td>${dev.lastSync?`${dev.lastSync.type==='upload'?'Enviou':'Baixou'} · ${new Date(dev.lastSync.timestamp).toLocaleDateString('pt-BR')}`:'—'}</td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-sm ${dev.isActive?'btn-ghost':'btn'}" onclick="toggleDevice('${dev.androidId}')">${dev.isActive?'Desativar':'Ativar'}</button>
+            <button class="btn btn-sm btn-perigo" onclick="deleteDevice('${dev.androidId}')">Excluir</button>
+          </td>
+        </tr>`).join('');
+    }else{
+      tb.innerHTML = '<tr><td colspan="6" class="vazio">Nenhum dispositivo registrado ainda.</td></tr>';
+    }
+  }catch(e){ console.error(e); }
+}
 
-        // Registrar dispositivo (MANTÉM IGUAL)
-        document.addEventListener('DOMContentLoaded', function() {
-            document.getElementById('deviceForm').addEventListener('submit', async (e) => {
-                e.preventDefault();
-                if (!checkAuth()) return;
+document.getElementById('deviceForm').addEventListener('submit', async e=>{
+  e.preventDefault(); if(!checkAuth()) return;
+  const androidId = document.getElementById('androidId').value.trim();
+  const description = document.getElementById('description').value.trim();
+  try{
+    const r = await fetch('/api/devices',{method:'POST',
+      headers:{...H(),'Content-Type':'application/json'},
+      body:JSON.stringify({androidId,description})});
+    const d = await r.json();
+    if(d.success){ e.target.reset(); await Promise.all([loadCompanyInfo(),loadDevices()]); }
+    else alert(d.message||'Erro ao registrar dispositivo');
+  }catch(err){ alert('Erro ao registrar dispositivo'); }
+});
 
-                const androidId = document.getElementById('androidId').value;
-                const description = document.getElementById('description').value;
+async function toggleDevice(id){
+  const r = await fetch(`/api/devices/${id}/toggle`,{method:'PUT',headers:H()});
+  const d = await r.json();
+  if(d.success) await Promise.all([loadCompanyInfo(),loadDevices()]);
+  else alert(d.message||'Erro ao alterar status');
+}
+async function deleteDevice(id){
+  if(!confirm('Excluir este dispositivo? Esta ação não pode ser desfeita.')) return;
+  const r = await fetch(`/api/devices/${id}`,{method:'DELETE',headers:H()});
+  const d = await r.json();
+  if(d.success) await Promise.all([loadCompanyInfo(),loadDevices()]);
+  else alert(d.message||'Erro ao excluir');
+}
 
-                try {
-                    const response = await fetch('/api/devices', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-                        },
-                        body: JSON.stringify({ androidId, description })
-                    });
+async function loadCargas(){
+  try{
+    const r = await fetch('/api/admin/loads',{headers:H()});
+    const d = await r.json();
+    const box = document.getElementById('loadsList');
+    if(d.success && d.loads.length){
+      box.innerHTML = d.loads.map(l=>`
+        <div class="carga">
+          <div>
+            <div class="tit">${l.type==='parcelas'?'Parcelas':'Parâmetros'} — ${l.description||l.originalName||''}</div>
+            <small>${l.version||''} · ${new Date(l.uploadDate).toLocaleDateString('pt-BR')}</small>
+          </div>
+          <div style="white-space:nowrap;text-align:right">
+            <span class="pill">${l.isActive?'ativa':'inativa'}</span>
+            <button class="btn btn-sm btn-ghost" onclick="toggleLoad('${l.id}')">${l.isActive?'Desativar':'Ativar'}</button>
+            <button class="btn btn-sm btn-perigo" onclick="deleteLoad('${l.id}')">Excluir</button>
+          </div>
+        </div>`).join('');
+    }else{
+      box.innerHTML = '<p class="vazio">Nenhuma carga enviada ainda. Use o formulário ao lado.</p>';
+    }
+  }catch(e){ document.getElementById('loadsList').innerHTML='<p class="vazio">Erro ao carregar cargas.</p>'; }
+}
 
-                    const data = await response.json();
-                    if (data.success) {
-                        document.getElementById('deviceForm').reset();
-                        await Promise.all([loadCompanyInfo(), loadDevices()]);
-                        alert('Dispositivo registrado com sucesso!');
-                    } else {
-                        throw new Error(data.message || 'Erro ao registrar dispositivo');
-                    }
-                } catch (error) {
-                    alert(error.message || 'Erro ao registrar dispositivo');
-                }
-            });
-        });
+async function toggleLoad(id){
+  const r = await fetch(`/api/admin/loads/${id}/toggle`,{method:'PUT',headers:H()});
+  const d = await r.json(); if(d.success) loadCargas(); else alert(d.message||'Erro');
+}
+async function deleteLoad(id){
+  if(!confirm('Excluir esta carga? Esta ação não pode ser desfeita.')) return;
+  const r = await fetch(`/api/admin/loads/${id}`,{method:'DELETE',headers:H()});
+  const d = await r.json(); if(d.success) loadCargas(); else alert(d.message||'Erro');
+}
 
-        // Ativar/Desativar dispositivo (MANTÉM IGUAL)
-        async function toggleDevice(androidId) {
-            if (!checkAuth()) return;
+document.getElementById('uploadForm').addEventListener('submit', async e=>{
+  e.preventDefault();
+  const fd = new FormData();
+  fd.append('file', document.getElementById('loadFile').files[0]);
+  fd.append('type', document.getElementById('loadType').value);
+  fd.append('version', document.getElementById('loadVersion').value);
+  fd.append('description', document.getElementById('loadDescription').value);
+  const btn = e.target.querySelector('button[type="submit"]');
+  btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Enviando…';
+  try{
+    const r = await fetch('/api/admin/loads/upload',{method:'POST',headers:H(),body:fd});
+    const d = await r.json();
+    if(d.success){ e.target.reset(); loadCargas(); }
+    else alert(d.message||'Erro ao enviar carga');
+  }catch(err){ alert('Erro ao enviar carga'); }
+  finally{ btn.disabled=false; btn.textContent=txt; }
+});
 
-            try {
-                const response = await fetch(`/api/devices/${androidId}/toggle`, {
-                    method: 'PUT',
-                    headers: {
-                        'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-                    }
-                });
+async function loadSyncHistory(){
+  try{
+    const r = await fetch('/api/admin/sync/history',{headers:H()});
+    const d = await r.json();
+    const tb = document.getElementById('syncHistoryList');
+    if(d.success && d.history.length){
+      tb.innerHTML = d.history.map(it=>`
+        <tr>
+          <td>${new Date(it.timestamp).toLocaleString('pt-BR')}</td>
+          <td style="font-family:ui-monospace,monospace;font-size:12px">${it.androidId}</td>
+          <td><span class="selo ${it.type==='upload'?'up':'down'}">${it.type==='upload'?'Enviado':'Baixado'}</span></td>
+          <td>${it.filename||''}</td>
+          <td>${formatSize(it.fileSize)}</td>
+          <td>${it.type==='upload'?`<button class="btn btn-sm btn-ghost" onclick="downloadSync('${it.id}')">Baixar</button>`:'—'}</td>
+        </tr>`).join('');
+    }else{
+      tb.innerHTML = '<tr><td colspan="6" class="vazio">Nenhuma exportação recebida ainda.</td></tr>';
+    }
+  }catch(e){ console.error(e); }
+}
 
-                const data = await response.json();
-                if (data.success) {
-                    await Promise.all([loadCompanyInfo(), loadDevices()]);
-                } else {
-                    alert(data.message || 'Erro ao alterar status do dispositivo');
-                }
-            } catch (error) {
-                alert('Erro ao alterar status do dispositivo');
-            }
-        }
+async function downloadSync(id){
+  try{
+    const r = await fetch(`/api/admin/sync/download/${id}`,{headers:H()});
+    if(!r.ok){ const d=await r.json(); return alert(d.message||'Erro ao baixar'); }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (r.headers.get('Content-Disposition')||'').split('filename=')[1]?.replace(/"/g,'') || 'exportacao.csv';
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  }catch(e){ alert('Erro ao baixar arquivo'); }
+}
 
-        // Deletar dispositivo (MANTÉM IGUAL)
-        async function deleteDevice(androidId) {
-            if (!checkAuth()) return;
+function formatSize(b){
+  if(!b) return '0 B';
+  const k=1024, u=['B','KB','MB','GB'], i=Math.floor(Math.log(b)/Math.log(k));
+  return parseFloat((b/Math.pow(k,i)).toFixed(1))+' '+u[i];
+}
 
-            if (!confirm('Tem certeza que deseja excluir este dispositivo? Esta ação não pode ser desfeita.')) {
-                return;
-            }
-
-            try {
-                const response = await fetch(`/api/devices/${androidId}`, {
-                    method: 'DELETE',
-                    headers: {
-                        'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-                    }
-                });
-
-                const data = await response.json();
-                if (data.success) {
-                    await Promise.all([loadCompanyInfo(), loadDevices()]);
-                    alert('Dispositivo excluído com sucesso!');
-                } else {
-                    throw new Error(data.message || 'Erro ao excluir dispositivo');
-                }
-            } catch (error) {
-                alert(error.message || 'Erro ao excluir dispositivo');
-            }
-        }
-
-        // ===== NOVAS FUNÇÕES DE SINCRONIZAÇÃO =====
-
-        // Função para carregar cargas disponíveis
-        async function loadCargas() {
-            const token = localStorage.getItem('authToken');
-            try {
-                const response = await fetch('/api/admin/loads', {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-
-                const data = await response.json();
-                
-                if (data.success) {
-                    const loadsList = document.getElementById('loadsList');
-                    if (data.loads.length === 0) {
-                        loadsList.innerHTML = '<p class="text-muted">Nenhuma carga disponível</p>';
-                    } else {
-                        loadsList.innerHTML = data.loads.map(load => `
-                            <div class="card mb-2">
-                                <div class="card-body p-2">
-                                    <div class="d-flex justify-content-between align-items-start">
-                                        <div>
-                                            <h6 class="mb-1">
-                                                ${load.type === 'parcelas' ? '📍' : '⚙️'} 
-                                                ${load.description || load.originalName}
-                                            </h6>
-                                            <small class="text-muted">
-                                                Versão: ${load.version} | 
-                                                ${new Date(load.uploadDate).toLocaleDateString()}
-                                            </small>
-                                        </div>
-                                        <div class="btn-group btn-group-sm">
-                                            <button onclick="toggleLoad('${load.id}')" 
-                                                    class="btn btn-outline-${load.isActive ? 'success' : 'danger'}">
-                                                ${load.isActive ? 'Ativo' : 'Inativo'}
-                                            </button>
-                                            <button onclick="deleteLoad('${load.id}')" 
-                                                    class="btn btn-outline-danger" 
-                                                    title="Excluir carga">
-                                                <i class="fas fa-trash"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        `).join('');
-                    }
-                }
-            } catch (error) {
-                console.error('Erro ao carregar cargas:', error);
-                document.getElementById('loadsList').innerHTML = '<p class="text-danger">Erro ao carregar cargas</p>';
-            }
-        }
-
-        // Função para ativar/desativar carga
-        async function toggleLoad(loadId) {
-            const token = localStorage.getItem('authToken');
-            try {
-                const response = await fetch(`/api/admin/loads/${loadId}/toggle`, {
-                    method: 'PUT',
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-
-                const data = await response.json();
-                if (data.success) {
-                    loadCargas();
-                } else {
-                    alert(data.message || 'Erro ao alterar status da carga');
-                }
-            } catch (error) {
-                console.error('Erro:', error);
-                alert('Erro ao alterar status da carga');
-            }
-        }
-
-        // Função para carregar histórico de sincronização
-        async function loadSyncHistory() {
-            const token = localStorage.getItem('authToken');
-            try {
-                const response = await fetch('/api/admin/sync/history', {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-
-                const data = await response.json();
-                
-                if (data.success) {
-                    const tbody = document.getElementById('syncHistoryList');
-                    if (data.history.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Nenhuma sincronização registrada</td></tr>';
-                    } else {
-                        tbody.innerHTML = data.history.map(item => `
-                            <tr>
-                                <td>${new Date(item.timestamp).toLocaleString()}</td>
-                                <td>${item.androidId}</td>
-                                <td>
-                                    <span class="badge ${item.type === 'upload' ? 'bg-info' : 'bg-success'}">
-                                        ${item.type === 'upload' ? '📤 Upload' : '📥 Download'}
-                                    </span>
-                                </td>
-                                <td>${item.filename}</td>
-                                <td>${formatFileSize(item.fileSize)}</td>
-                                <td>
-                                    ${item.type === 'upload' ? `
-                                        <button onclick="downloadSyncFile('${item.id}')" class="btn btn-sm btn-outline-primary">
-                                            <i class="fas fa-download"></i> Baixar
-                                        </button>
-                                    ` : '-'}
-                                </td>
-                            </tr>
-                        `).join('');
-                    }
-                }
-            } catch (error) {
-                console.error('Erro ao carregar histórico:', error);
-            }
-        }
-
-        // Função para baixar arquivo de sincronização
-        async function downloadSyncFile(syncId) {
-            const token = localStorage.getItem('authToken');
-            try {
-                const response = await fetch(`/api/admin/sync/download/${syncId}`, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-
-                if (response.ok) {
-                    const blob = await response.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.style.display = 'none';
-                    a.href = url;
-                    a.download = response.headers.get('Content-Disposition')?.split('filename=')[1]?.replace(/"/g, '') || 'arquivo.csv';
-                    document.body.appendChild(a);
-                    a.click();
-                    window.URL.revokeObjectURL(url);
-                    document.body.removeChild(a);
-                } else {
-                    const data = await response.json();
-                    alert(data.message || 'Erro ao baixar arquivo');
-                }
-            } catch (error) {
-                console.error('Erro no download:', error);
-                alert('Erro ao baixar arquivo');
-            }
-        }
-
-        // Função para excluir carga
-        async function deleteLoad(loadId) {
-            const token = localStorage.getItem('authToken');
-            
-            if (!confirm('Tem certeza que deseja excluir esta carga? Esta ação não pode ser desfeita.')) {
-                return;
-            }
-
-            try {
-                const response = await fetch(`/api/admin/loads/${loadId}`, {
-                    method: 'DELETE',
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-
-                const data = await response.json();
-                if (data.success) {
-                    alert('Carga excluída com sucesso!');
-                    loadCargas();
-                } else {
-                    alert(data.message || 'Erro ao excluir carga');
-                }
-            } catch (error) {
-                console.error('Erro:', error);
-                alert('Erro ao excluir carga');
-            }
-        }
-
-        // Função para formatar tamanho do arquivo
-        function formatFileSize(bytes) {
-            if (bytes === 0) return '0 Bytes';
-            const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        }
-
-        // Handle do formulário de upload
-        document.addEventListener('DOMContentLoaded', function() {
-            document.getElementById('uploadForm').addEventListener('submit', async function(e) {
-                e.preventDefault();
-
-                const formData = new FormData();
-                formData.append('file', document.getElementById('loadFile').files[0]);
-                formData.append('type', document.getElementById('loadType').value);
-                formData.append('version', document.getElementById('loadVersion').value);
-                formData.append('description', document.getElementById('loadDescription').value);
-
-                const token = localStorage.getItem('authToken');
-
-                try {
-                    const submitBtn = e.target.querySelector('button[type="submit"]');
-                    submitBtn.disabled = true;
-                    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Enviando...';
-
-                    const response = await fetch('/api/admin/loads/upload', {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${token}`
-                        },
-                        body: formData
-                    });
-
-                    const data = await response.json();
-
-                    if (data.success) {
-                        alert('Carga enviada com sucesso!');
-                        document.getElementById('uploadForm').reset();
-                        loadCargas();
-                    } else {
-                        alert(data.message || 'Erro ao enviar carga');
-                    }
-                } catch (error) {
-                    console.error('Erro no upload:', error);
-                    alert('Erro ao enviar carga');
-                } finally {
-                    const submitBtn = e.target.querySelector('button[type="submit"]');
-                    submitBtn.disabled = false;
-                    submitBtn.innerHTML = '<i class="fas fa-upload"></i> Enviar Carga';
-                }
-            });
-
-            // Carregar histórico quando a aba de sincronização for aberta
-            document.getElementById('sync-tab').addEventListener('shown.bs.tab', function() {
-                loadSyncHistory();
-                loadCargas();
-            });
-        });
-
-        // Função logout (MANTÉM IGUAL)
-        function logout() {
-            localStorage.removeItem('authToken');
-            window.location.href = '/';
-        }
-
-        // Inicialização (ATUALIZADA)
-        document.addEventListener('DOMContentLoaded', () => {
-            if (checkAuth()) {
-                Promise.all([loadCompanyInfo(), loadDevices()])
-                    .catch(error => console.error('Erro na inicialização:', error));
-            }
-        });
-    </script>
+// Início
+if(checkAuth()){ loadCompanyInfo(); loadDevices(); }
+</script>
 </body>
 </html>
