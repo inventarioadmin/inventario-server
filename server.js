@@ -1187,6 +1187,24 @@ app.get('/api/admin/os/:osId', auth, checkLicense, async (req, res) => {
     }
 });
 
+// ===== FATIA 2: excluir uma O.S. =====
+app.delete('/api/admin/os/:osId', auth, checkLicense, async (req, res) => {
+    try {
+        const os = await OrdemServico.findOne({
+            _id: req.params.osId,
+            companyId: req.user.companyId
+        });
+        if (!os) {
+            return res.status(404).json({ success: false, message: 'O.S. não encontrada' });
+        }
+        await os.deleteOne();
+        res.json({ success: true, message: 'O.S. excluída com sucesso' });
+    } catch (error) {
+        console.error('Erro ao excluir O.S.:', error);
+        res.status(500).json({ success: false, message: 'Erro: ' + error.message });
+    }
+});
+
 // ===== FATIA 1 - Passo 2: listar as O.S. já criadas (pra conferência) =====
 app.get('/api/admin/os', auth, checkLicense, async (req, res) => {
     try {
