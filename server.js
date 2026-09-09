@@ -65,6 +65,54 @@ const loadSchema = new mongoose.Schema({
 
 const Load = mongoose.model('Load', loadSchema);
 
+// ===== FATIA 1: leitura do CSV de parcelas =====
+
+// Monta a chave única de uma parcela. ESTE formato tem que ser IGUAL no app depois:
+// PROJETO|FAZENDA|TALHAO|NUMERO — sem espaço nas pontas, tudo MAIÚSCULO, espaços internos colapsados.
+function montarChaveParcela(projeto, fazenda, talhao, numero) {
+    const limpar = (s) => (s || '').toString().trim().toUpperCase().replace(/\s+/g, ' ');
+    return [limpar(projeto), limpar(fazenda), limpar(talhao), limpar(numero)].join('|');
+}
+
+// Lê o texto do CSV de uma carga de parcelas e devolve a lista de parcelas com suas chaves.
+function extrairParcelasDoCsv(conteudoCsv) {
+    if (!conteudoCsv || !conteudoCsv.trim()) {
+        return { ok: false, motivo: 'CSV vazio', parcelas: [] };
+    }
+    // Remove o BOM (arquivos do Excel costumam vir com ele) e aceita quebra de linha do Windows ou Linux.
+    let texto = conteudoCsv.replace(/^\uFEFF/, '');
+    const linhas = texto.split(/\r?\n/).filter(l => l.trim() !== '');
+    if (linhas.length < 2) {
+        return { ok: false, motivo: 'CSV sem linhas de dados', parcelas: [] };
+    }
+    // No cabeçalho, descobre em qual coluna está cada campo (tolera acento e maiúsc/minúsc).
+    const semAcento = (s) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const cabecalho = linhas[0].split(';').map(h => semAcento(h.trim().toLowerCase()));
+    const acharCol = (nome) => cabecalho.findIndex(h => h.includes(nome));
+    const iNumero  = acharCol('numero_parcela');
+    const iProjeto = acharCol('projeto');
+    const iFazenda = acharCol('fazenda');
+    const iTalhao  = acharCol('talhao');
+    if (iNumero < 0 || iProjeto < 0 || iFazenda < 0 || iTalhao < 0) {
+        return { ok: false, motivo: 'Cabeçalho não tem as colunas esperadas (numero_parcela, projeto, fazenda, talhao)', parcelas: [], cabecalho };
+    }
+    const vistas = new Set();
+    const parcelas = [];
+    for (let i = 1; i < linhas.length; i++) {
+        const campos = linhas[i].split(';');
+        const numero  = (campos[iNumero]  || '').trim();
+        const projeto = (campos[iProjeto] || '').trim();
+        const fazenda = (campos[iFazenda] || '').trim();
+        const talhao  = (campos[iTalhao]  || '').trim();
+        if (!numero && !projeto && !fazenda && !talhao) continue; // linha em branco
+        const chave = montarChaveParcela(projeto, fazenda, talhao, numero);
+        if (vistas.has(chave)) continue; // ignora chave repetida
+        vistas.add(chave);
+        parcelas.push({ chave, numero, projeto, fazenda, talhao });
+    }
+    return { ok: true, motivo: '', parcelas };
+}
+
 // CONFIGURAÇÃO DO MULTER — memória (o conteúdo vai para o MongoDB, não para o disco).
 // Isso resolve o sumiço de arquivos quando o Render reinicia.
 const storage = multer.memoryStorage();
@@ -992,6 +1040,34 @@ app.get('/api/mobile/sync/download/:loadId', mobileAuth, checkLicense, async (re
     }
 });
 
+// ===== FATIA 1 (teste): pré-visualizar as chaves de uma carga. NÃO grava nada. =====
+app.get('/api/admin/os/preview/:loadId', auth, checkLicense, async (req, res) => {
+    try {
+        const load = await Load.findOne({
+            _id: req.params.loadId,
+            companyId: req.user.companyId
+        });
+        if (!load) {
+            return res.status(404).json({ success: false, message: 'Carga não encontrada' });
+        }
+        if (load.type !== 'parcelas') {
+            return res.status(400).json({ success: false, message: 'Esta carga não é de parcelas (type = ' + load.type + ')' });
+        }
+        const resultado = extrairParcelasDoCsv(load.conteudo);
+        if (!resultado.ok) {
+            return res.status(400).json({ success: false, message: resultado.motivo, cabecalho: resultado.cabecalho });
+        }
+        res.json({
+            success: true,
+            carga: load.originalName,
+            total: resultado.parcelas.length,
+            amostra: resultado.parcelas.slice(0, 10)
+        });
+    } catch (error) {
+        console.error('Erro no preview da O.S.:', error);
+        res.status(500).json({ success: false, message: 'Erro: ' + error.message });
+    }
+});
 
 
 // 5. LISTAR CARGAS (para admin)
