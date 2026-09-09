@@ -1165,6 +1165,18 @@ app.get('/api/admin/os/:osId', auth, checkLicense, async (req, res) => {
             total: Object.values(porLider[lider]).reduce((a, b) => a + b, 0)
         }));
 
+        // Lista enxuta de pontos para o mapa: chave, situação e coordenada.
+        const pontos = os.parcelas
+            .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number')
+            .map(p => ({
+                chave: p.chave,
+                numero: p.numero,
+                situacao: p.situacao || 'pendente',
+                lider: p.lider || null,
+                lat: p.lat,
+                lng: p.lng
+            }));
+
         res.json({
             success: true,
             os: {
@@ -1178,7 +1190,8 @@ app.get('/api/admin/os/:osId', auth, checkLicense, async (req, res) => {
                     pendentes,
                     recusadas
                 },
-                resumoPorLider
+                resumoPorLider,
+                pontos
             }
         });
     } catch (error) {
