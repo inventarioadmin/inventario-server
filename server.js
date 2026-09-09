@@ -79,7 +79,9 @@ const osSchema = new mongoose.Schema({
         numero: String,
         projeto: String,
         fazenda: String,
-        talhao: String
+        talhao: String,
+        lat: Number,
+        lng: Number
     }]
 });
 
@@ -113,9 +115,17 @@ function extrairParcelasDoCsv(conteudoCsv) {
     const iProjeto = acharCol('projeto');
     const iFazenda = acharCol('fazenda');
     const iTalhao  = acharCol('talhao');
+    const iUtmX    = acharCol('utm_x');   // no seu CSV isto é a LONGITUDE (ex: -50,63)
+    const iUtmY    = acharCol('utm_y');   // no seu CSV isto é a LATITUDE  (ex: -24,01)
     if (iNumero < 0 || iProjeto < 0 || iFazenda < 0 || iTalhao < 0) {
         return { ok: false, motivo: 'Cabeçalho não tem as colunas esperadas (numero_parcela, projeto, fazenda, talhao)', parcelas: [], cabecalho };
     }
+    // Converte "-50,63" (vírgula) em número -50.63. Devolve null se não for número.
+    const coordNum = (txt) => {
+        if (!txt) return null;
+        const n = parseFloat(txt.toString().trim().replace(',', '.'));
+        return isNaN(n) ? null : n;
+    };
     const vistas = new Set();
     const parcelas = [];
     for (let i = 1; i < linhas.length; i++) {
@@ -128,7 +138,9 @@ function extrairParcelasDoCsv(conteudoCsv) {
         const chave = montarChaveParcela(projeto, fazenda, talhao, numero);
         if (vistas.has(chave)) continue; // ignora chave repetida
         vistas.add(chave);
-        parcelas.push({ chave, numero, projeto, fazenda, talhao });
+        const lng = iUtmX >= 0 ? coordNum(campos[iUtmX]) : null;
+        const lat = iUtmY >= 0 ? coordNum(campos[iUtmY]) : null;
+        parcelas.push({ chave, numero, projeto, fazenda, talhao, lat, lng });
     }
     return { ok: true, motivo: '', parcelas };
 }
