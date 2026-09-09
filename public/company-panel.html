@@ -120,6 +120,7 @@
   <div class="abas">
     <button class="aba on" data-alvo="pDispositivos">Dispositivos</button>
     <button class="aba" data-alvo="pSync">Cargas &amp; Sincronização</button>
+    <button class="aba" data-alvo="pOS">Ordens de Serviço</button>
   </div>
 
   <!-- DISPOSITIVOS -->
@@ -200,6 +201,18 @@
       </div>
     </div>
   </div>
+
+  <!-- ORDENS DE SERVIÇO -->
+  <div class="painel" id="pOS">
+    <div class="secao">
+      <h3 style="display:flex;justify-content:space-between;align-items:center">
+        Ordens de Serviço
+        <button class="btn btn-sm btn-ghost" onclick="loadOrdens()">Atualizar</button>
+      </h3>
+      <div id="osList"><p class="vazio">Carregando…</p></div>
+    </div>
+    <div id="osDetalhe"></div>
+  </div>
 </div>
 
 <script>
@@ -217,6 +230,7 @@ document.querySelectorAll('.aba').forEach(b=>{
     b.classList.add('on');
     document.getElementById(b.dataset.alvo).classList.add('on');
     if(b.dataset.alvo==='pSync'){ loadCargas(); loadSyncHistory(); }
+    if(b.dataset.alvo==='pOS'){ loadOrdens(); }
   };
 });
 
@@ -297,6 +311,49 @@ async function deleteDevice(id){
   else alert(d.message||'Erro ao excluir');
 }
 
+// ===== ORDENS DE SERVIÇO =====
+async function loadOrdens(){
+  try{
+    const r = await fetch('/api/admin/os',{headers:H()});
+    const d = await r.json();
+    const box = document.getElementById('osList');
+    if(d.success && d.ordens && d.ordens.length){
+      box.innerHTML = d.ordens.map(os=>`
+        <div class="carga">
+          <div>
+            <div class="tit">${os.nome||''}</div>
+            <small>${os.totalParcelas} parcela(s) · criada em ${new Date(os.criadaEm).toLocaleDateString('pt-BR')}</small>
+          </div>
+          <div style="white-space:nowrap;text-align:right">
+            <button class="btn btn-sm" onclick="abrirOS('${os.id}')">Abrir</button>
+          </div>
+        </div>`).join('');
+    }else{
+      box.innerHTML = '<p class="vazio">Nenhuma O.S. criada ainda. Crie uma a partir de uma carga de parcelas na aba "Cargas & Sincronização".</p>';
+    }
+  }catch(e){ document.getElementById('osList').innerHTML='<p class="vazio">Erro ao carregar ordens de serviço.</p>'; }
+}
+
+async function abrirOS(id){
+  // No Passo A só confirma que abriu; o desenho dos totais vem no Passo B.
+  document.getElementById('osDetalhe').innerHTML = '<div class="secao"><p class="vazio">Abrindo O.S. '+id+'…</p></div>';
+}
+
+async function criarOS(loadId){
+  if(!confirm('Criar uma Ordem de Serviço a partir desta carga?')) return;
+  try{
+    const r = await fetch('/api/admin/os/criar/'+loadId,{method:'POST',headers:H()});
+    const d = await r.json();
+    if(d.success){
+      alert('O.S. criada: '+d.nome+' ('+d.totalParcelas+' parcelas)');
+    }else if(r.status===409){
+      alert('Esta carga já tem uma O.S. criada.');
+    }else{
+      alert(d.message||'Erro ao criar O.S.');
+    }
+  }catch(e){ alert('Erro ao criar O.S.'); }
+}
+
 async function loadCargas(){
   try{
     const r = await fetch('/api/admin/loads',{headers:H()});
@@ -311,6 +368,7 @@ async function loadCargas(){
           </div>
           <div style="white-space:nowrap;text-align:right">
             <span class="pill">${l.isActive?'ativa':'inativa'}</span>
+            ${l.type==='parcelas'?`<button class="btn btn-sm" onclick="criarOS('${l.id}')">Criar O.S.</button>`:''}
             <button class="btn btn-sm btn-ghost" onclick="toggleLoad('${l.id}')">${l.isActive?'Desativar':'Ativar'}</button>
             <button class="btn btn-sm btn-perigo" onclick="deleteLoad('${l.id}')">Excluir</button>
           </div>
