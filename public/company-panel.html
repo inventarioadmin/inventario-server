@@ -100,6 +100,8 @@
   .carga small{color:var(--tinta-3);font-size:12px}
   .pill{font-size:11px;padding:2px 8px;border-radius:5px;background:var(--papel-2);color:var(--tinta-3)}
 </style>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
 
@@ -334,6 +336,8 @@ async function loadOrdens(){
   }catch(e){ document.getElementById('osList').innerHTML='<p class="vazio">Erro ao carregar ordens de serviço.</p>'; }
 }
 
+let osMapa = null; // guarda a instância do mapa pra poder recriar ao trocar de O.S.
+
 async function abrirOS(id){
   const box = document.getElementById('osDetalhe');
   box.innerHTML = '<div class="secao"><p class="vazio">Carregando…</p></div>';
@@ -344,7 +348,6 @@ async function abrirOS(id){
     const os = d.os;
     const t = os.totais;
 
-    // Cartões de total por status
     const cards = `
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px">
         <div class="secao" style="text-align:center;margin:0">
@@ -365,7 +368,6 @@ async function abrirOS(id){
         </div>
       </div>`;
 
-    // Resumo por líder -> dia
     let resumo;
     if(os.resumoPorLider && os.resumoPorLider.length){
       resumo = os.resumoPorLider.map(l=>`
@@ -374,11 +376,7 @@ async function abrirOS(id){
           <td>${l.dias.map(x=>x.dia+' — '+x.total).join('<br>')}</td>
           <td style="text-align:right"><b>${l.total}</b></td>
         </tr>`).join('');
-      resumo = `
-        <table>
-          <thead><tr><th>Equipe / Líder</th><th>Por dia</th><th style="text-align:right">Total</th></tr></thead>
-          <tbody>${resumo}</tbody>
-        </table>`;
+      resumo = `<table><thead><tr><th>Equipe / Líder</th><th>Por dia</th><th style="text-align:right">Total</th></tr></thead><tbody>${resumo}</tbody></table>`;
     }else{
       resumo = '<p class="vazio">Aguardando as equipes sincronizarem. Assim que o app enviar as parcelas feitas, o resumo por equipe aparece aqui.</p>';
     }
@@ -388,14 +386,66 @@ async function abrirOS(id){
         <h3 style="margin-bottom:4px">${os.nome}</h3>
         <small style="color:var(--tinta-3)">Criada em ${new Date(os.criadaEm).toLocaleDateString('pt-BR')}</small>
       </div>
+      <div class="secao">
+        <h3 style="margin-bottom:12px">Mapa das parcelas</h3>
+        <div id="osMapaBox" style="height:460px;border-radius:8px;overflow:hidden"></div>
+        <div style="margin-top:10px;font-size:13px;color:var(--tinta-3)">
+          <span style="color:var(--verde)">●</span> Feita nesta equipe &nbsp;
+          <span style="color:var(--azul)">●</span> Feita por outra equipe &nbsp;
+          <span style="color:var(--vermelho)">●</span> Pendente &nbsp;
+          <span style="color:var(--amarelo)">●</span> Recusada
+        </div>
+      </div>
       ${cards}
       <div class="secao">
         <h3>Resumo por equipe</h3>
         ${resumo}
       </div>`;
+
+    desenharMapa(os.pontos || []);
   }catch(e){
     box.innerHTML = '<div class="secao"><p class="vazio">Erro ao abrir O.S.</p></div>';
   }
+}
+
+function corDoStatus(situacao){
+  if(situacao==='feita') return '#2e7d46';        // verde
+  if(situacao==='sincronizada') return '#2563a8'; // azul
+  if(situacao==='recusada') return '#c99a2e';     // amarelo
+  return '#b0413a';                               // vermelho (pendente)
+}
+
+function desenharMapa(pontos){
+  // Recria o mapa do zero a cada abertura (evita sobreposição ao trocar de O.S.)
+  if(osMapa){ osMapa.remove(); osMapa = null; }
+  const el = document.getElementById('osMapaBox');
+  if(!el) return;
+  if(!pontos.length){ el.innerHTML = '<p class="vazio">Nenhuma parcela com coordenada nesta O.S.</p>'; return; }
+
+  osMapa = L.map('osMapaBox');
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '© OpenStreetMap'
+  }).addTo(osMapa);
+
+  const grupo = [];
+  pontos.forEach(p=>{
+    const m = L.circleMarker([p.lat, p.lng], {
+      radius: 6, color: '#fff', weight: 1,
+      fillColor: corDoStatus(p.situacao), fillOpacity: 0.9
+    }).addTo(osMapa);
+    m.bindPopup('<b>'+(p.numero||p.chave)+'</b><br>'+
+      (p.situacao==='pendente'?'Pendente':
+       p.situacao==='feita'?'Feita':
+       p.situacao==='sincronizada'?'Feita por outra equipe':'Recusada')+
+      (p.lider?'<br>Líder: '+p.lider:''));
+    grupo.push([p.lat, p.lng]);
+  });
+
+  // Enquadra o mapa em todos os pontos
+  osMapa.fitBounds(grupo, { padding: [30, 30] });
+
+  // Corrige o tamanho do mapa (Leaflet precisa recalcular quando aparece dentro de aba)
+  setTimeout(()=>{ if(osMapa) osMapa.invalidateSize(); }, 200);
 }
 
 async function criarOS(loadId){
