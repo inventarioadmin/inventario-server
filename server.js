@@ -65,6 +65,26 @@ const loadSchema = new mongoose.Schema({
 
 const Load = mongoose.model('Load', loadSchema);
 
+// ===== FATIA 1 - Passo 2: schema da Ordem de Serviço (O.S.) =====
+const osSchema = new mongoose.Schema({
+    companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true },
+    loadId: { type: mongoose.Schema.Types.ObjectId, ref: 'Load', required: true },
+    nome: { type: String, required: true },        // nome da O.S. (começa igual ao nome da carga)
+    criadaEm: { type: Date, default: Date.now },
+    totalParcelas: { type: Number, default: 0 },
+    // A lista de parcelas da O.S. Nesta fatia só guardamos a chave e os campos de origem.
+    // Os campos de status (coletor, dataHora, situação) entram na Fatia 2.
+    parcelas: [{
+        chave: { type: String, required: true },
+        numero: String,
+        projeto: String,
+        fazenda: String,
+        talhao: String
+    }]
+});
+
+const OrdemServico = mongoose.model('OrdemServico', osSchema);
+
 // ===== FATIA 1: leitura do CSV de parcelas =====
 
 // Monta a chave única de uma parcela. ESTE formato tem que ser IGUAL no app depois:
@@ -1037,6 +1057,65 @@ app.get('/api/mobile/sync/download/:loadId', mobileAuth, checkLicense, async (re
     } catch (error) {
         console.error('Erro no download:', error);
         res.status(500).json({ success: false, message: 'Erro no download: ' + error.message });
+    }
+});
+
+// ===== FATIA 1 - Passo 2: criar uma O.S. a partir de uma carga de parcelas =====
+app.post('/api/admin/os/criar/:loadId', auth, checkLicense, async (req, res) => {
+    try {
+        const load = await Load.findOne({
+            _id: req.params.loadId,
+            companyId: req.user.companyId
+        });
+        if (!load) {
+            return res.status(404).json({ success: false, message: 'Carga não encontrada' });
+        }
+        if (load.type !== 'parcelas') {
+            return res.status(400).json({ success: false, message: 'Esta carga não é de parcelas (type = ' + load.type + ')' });
+        }
+        const resultado = extrairParcelasDoCsv(load.conteudo);
+        if (!resultado.ok) {
+            return res.status(400).json({ success: false, message: resultado.motivo, cabecalho: resultado.cabecalho });
+        }
+        const os = new OrdemServico({
+            companyId: req.user.companyId,
+            loadId: load._id,
+            nome: load.originalName,
+            totalParcelas: resultado.parcelas.length,
+            parcelas: resultado.parcelas
+        });
+        await os.save();
+        res.json({
+            success: true,
+            message: 'O.S. criada com sucesso',
+            osId: os._id,
+            nome: os.nome,
+            totalParcelas: os.totalParcelas
+        });
+    } catch (error) {
+        console.error('Erro ao criar O.S.:', error);
+        res.status(500).json({ success: false, message: 'Erro: ' + error.message });
+    }
+});
+
+// ===== FATIA 1 - Passo 2: listar as O.S. já criadas (pra conferência) =====
+app.get('/api/admin/os', auth, checkLicense, async (req, res) => {
+    try {
+        const lista = await OrdemServico.find({ companyId: req.user.companyId })
+            .sort({ criadaEm: -1 });
+        res.json({
+            success: true,
+            total: lista.length,
+            ordens: lista.map(os => ({
+                id: os._id,
+                nome: os.nome,
+                criadaEm: os.criadaEm,
+                totalParcelas: os.totalParcelas
+            }))
+        });
+    } catch (error) {
+        console.error('Erro ao listar O.S.:', error);
+        res.status(500).json({ success: false, message: 'Erro: ' + error.message });
     }
 });
 
