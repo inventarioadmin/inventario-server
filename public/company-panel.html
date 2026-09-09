@@ -335,8 +335,67 @@ async function loadOrdens(){
 }
 
 async function abrirOS(id){
-  // No Passo A só confirma que abriu; o desenho dos totais vem no Passo B.
-  document.getElementById('osDetalhe').innerHTML = '<div class="secao"><p class="vazio">Abrindo O.S. '+id+'…</p></div>';
+  const box = document.getElementById('osDetalhe');
+  box.innerHTML = '<div class="secao"><p class="vazio">Carregando…</p></div>';
+  try{
+    const r = await fetch('/api/admin/os/'+id,{headers:H()});
+    const d = await r.json();
+    if(!d.success){ box.innerHTML = '<div class="secao"><p class="vazio">'+(d.message||'Erro ao abrir O.S.')+'</p></div>'; return; }
+    const os = d.os;
+    const t = os.totais;
+
+    // Cartões de total por status
+    const cards = `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px">
+        <div class="secao" style="text-align:center;margin:0">
+          <div style="font-size:28px;font-weight:600;color:var(--verde)">${t.feitas + t.sincronizadas}</div>
+          <small style="color:var(--tinta-3)">Feitas</small>
+        </div>
+        <div class="secao" style="text-align:center;margin:0">
+          <div style="font-size:28px;font-weight:600;color:var(--vermelho)">${t.pendentes}</div>
+          <small style="color:var(--tinta-3)">Pendentes</small>
+        </div>
+        <div class="secao" style="text-align:center;margin:0">
+          <div style="font-size:28px;font-weight:600;color:var(--amarelo)">${t.recusadas}</div>
+          <small style="color:var(--tinta-3)">Recusadas</small>
+        </div>
+        <div class="secao" style="text-align:center;margin:0">
+          <div style="font-size:28px;font-weight:600;color:var(--tinta)">${t.total}</div>
+          <small style="color:var(--tinta-3)">Total</small>
+        </div>
+      </div>`;
+
+    // Resumo por líder -> dia
+    let resumo;
+    if(os.resumoPorLider && os.resumoPorLider.length){
+      resumo = os.resumoPorLider.map(l=>`
+        <tr>
+          <td><b>${l.lider}</b></td>
+          <td>${l.dias.map(x=>x.dia+' — '+x.total).join('<br>')}</td>
+          <td style="text-align:right"><b>${l.total}</b></td>
+        </tr>`).join('');
+      resumo = `
+        <table>
+          <thead><tr><th>Equipe / Líder</th><th>Por dia</th><th style="text-align:right">Total</th></tr></thead>
+          <tbody>${resumo}</tbody>
+        </table>`;
+    }else{
+      resumo = '<p class="vazio">Aguardando as equipes sincronizarem. Assim que o app enviar as parcelas feitas, o resumo por equipe aparece aqui.</p>';
+    }
+
+    box.innerHTML = `
+      <div class="secao">
+        <h3 style="margin-bottom:4px">${os.nome}</h3>
+        <small style="color:var(--tinta-3)">Criada em ${new Date(os.criadaEm).toLocaleDateString('pt-BR')}</small>
+      </div>
+      ${cards}
+      <div class="secao">
+        <h3>Resumo por equipe</h3>
+        ${resumo}
+      </div>`;
+  }catch(e){
+    box.innerHTML = '<div class="secao"><p class="vazio">Erro ao abrir O.S.</p></div>';
+  }
 }
 
 async function criarOS(loadId){
