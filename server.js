@@ -81,7 +81,11 @@ const osSchema = new mongoose.Schema({
         fazenda: String,
         talhao: String,
         lat: Number,
-        lng: Number
+        lng: Number,
+        situacao: String,
+        lider: String,
+        dataHora: String,
+        motivo: String
     }]
 });
 
@@ -1196,6 +1200,81 @@ app.get('/api/admin/os/:osId', auth, checkLicense, async (req, res) => {
         });
     } catch (error) {
         console.error('Erro ao buscar O.S.:', error);
+        res.status(500).json({ success: false, message: 'Erro: ' + error.message });
+    }
+});
+
+// ===== FATIA 3: receber o mapa de status das equipes =====
+// O app manda { loadId, statuses: [{ chave, situacao, lider, dataHora, motivo }] }.
+// O servidor acha a O.S. daquela carga (cria se não existir) e pinta as parcelas.
+app.post('/api/app/os/status', auth, checkLicense, async (req, res) => {
+    try {
+        const { loadId, statuses } = req.body;
+        if (!loadId || !Array.isArray(statuses)) {
+            return res.status(400).json({ success: false, message: 'loadId e statuses são obrigatórios' });
+        }
+
+        // Acha a O.S. daquela carga.
+        let os = await OrdemServico.findOne({
+            companyId: req.user.companyId,
+            loadId: loadId
+        });
+
+        // Se não existir, cria automaticamente a partir da carga.
+        if (!os) {
+            const load = await Load.findOne({
+                _id: loadId,
+                companyId: req.user.companyId
+            });
+            if (!load) {
+                return res.status(404).json({ success: false, message: 'Carga não encontrada para este loadId' });
+            }
+            if (load.type !== 'parcelas') {
+                return res.status(400).json({ success: false, message: 'A carga não é de parcelas' });
+            }
+            const resultado = extrairParcelasDoCsv(load.conteudo);
+            if (!resultado.ok) {
+                return res.status(400).json({ success: false, message: 'Não foi possível ler a carga: ' + resultado.motivo });
+            }
+            os = new OrdemServico({
+                companyId: req.user.companyId,
+                loadId: load._id,
+                nome: load.originalName,
+                totalParcelas: resultado.parcelas.length,
+                parcelas: resultado.parcelas
+            });
+            await os.save();
+        }
+
+        // Índice das parcelas da O.S. por chave, pra casar rápido.
+        const porChave = {};
+        os.parcelas.forEach((p, i) => { porChave[p.chave] = i; });
+
+        let pintadas = 0, ignoradas = 0;
+        for (const st of statuses) {
+            const idx = porChave[st.chave];
+            if (idx === undefined) { ignoradas++; continue; } // chave não existe nesta O.S.
+            const p = os.parcelas[idx];
+            // situação válida: feita ou recusada (o app manda uma dessas)
+            p.situacao = (st.situacao === 'recusada') ? 'recusada' : 'feita';
+            p.lider = st.lider || null;
+            p.dataHora = st.dataHora || null;
+            p.motivo = (st.situacao === 'recusada') ? (st.motivo || '') : '';
+            pintadas++;
+        }
+
+        os.markModified('parcelas'); // avisa o Mongo que o array mudou
+        await os.save();
+
+        res.json({
+            success: true,
+            osId: os._id,
+            nome: os.nome,
+            pintadas,
+            ignoradas
+        });
+    } catch (error) {
+        console.error('Erro ao receber status:', error);
         res.status(500).json({ success: false, message: 'Erro: ' + error.message });
     }
 });
