@@ -1077,6 +1077,18 @@ app.post('/api/admin/os/criar/:loadId', auth, checkLicense, async (req, res) => 
         if (!resultado.ok) {
             return res.status(400).json({ success: false, message: resultado.motivo, cabecalho: resultado.cabecalho });
         }
+        // Trava anti-duplicata: se já existe O.S. desta carga, não cria outra.
+        const jaExiste = await OrdemServico.findOne({
+            companyId: req.user.companyId,
+            loadId: load._id
+        });
+        if (jaExiste) {
+            return res.status(409).json({
+                success: false,
+                message: 'Esta carga já tem uma O.S. criada',
+                osId: jaExiste._id
+            });
+        }
         const os = new OrdemServico({
             companyId: req.user.companyId,
             loadId: load._id,
@@ -1094,6 +1106,71 @@ app.post('/api/admin/os/criar/:loadId', auth, checkLicense, async (req, res) => 
         });
     } catch (error) {
         console.error('Erro ao criar O.S.:', error);
+        res.status(500).json({ success: false, message: 'Erro: ' + error.message });
+    }
+});
+
+// ===== FATIA 2: dados de UMA O.S. para a tela (totais + resumo por líder/dia) =====
+app.get('/api/admin/os/:osId', auth, checkLicense, async (req, res) => {
+    try {
+        const os = await OrdemServico.findOne({
+            _id: req.params.osId,
+            companyId: req.user.companyId
+        });
+        if (!os) {
+            return res.status(404).json({ success: false, message: 'O.S. não encontrada' });
+        }
+
+        // Conta cada estado. Nesta fatia o app ainda não envia status,
+        // então toda parcela sem 'situacao' definida conta como pendente.
+        let feitas = 0, pendentes = 0, recusadas = 0, sincronizadas = 0;
+        // Resumo por líder -> por dia. Ex: { "João": { "14/08/2026": 7 } }
+        const porLider = {};
+
+        for (const p of os.parcelas) {
+            const situacao = p.situacao || 'pendente';
+            if (situacao === 'feita') feitas++;
+            else if (situacao === 'sincronizada') sincronizadas++;
+            else if (situacao === 'recusada') recusadas++;
+            else pendentes++;
+
+            // Só entra no resumo quem tem líder registrado (feitas/sincronizadas)
+            if ((situacao === 'feita' || situacao === 'sincronizada') && p.lider) {
+                const lider = p.lider;
+                const dia = p.dataHora || 'sem data';
+                if (!porLider[lider]) porLider[lider] = {};
+                porLider[lider][dia] = (porLider[lider][dia] || 0) + 1;
+            }
+        }
+
+        // Transforma o resumo em lista pronta pra tela
+        const resumoPorLider = Object.keys(porLider).sort().map(lider => ({
+            lider,
+            dias: Object.keys(porLider[lider]).sort().map(dia => ({
+                dia,
+                total: porLider[lider][dia]
+            })),
+            total: Object.values(porLider[lider]).reduce((a, b) => a + b, 0)
+        }));
+
+        res.json({
+            success: true,
+            os: {
+                id: os._id,
+                nome: os.nome,
+                criadaEm: os.criadaEm,
+                totais: {
+                    total: os.totalParcelas,
+                    feitas,
+                    sincronizadas,
+                    pendentes,
+                    recusadas
+                },
+                resumoPorLider
+            }
+        });
+    } catch (error) {
+        console.error('Erro ao buscar O.S.:', error);
         res.status(500).json({ success: false, message: 'Erro: ' + error.message });
     }
 });
