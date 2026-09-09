@@ -1204,6 +1204,43 @@ app.get('/api/admin/os/:osId', auth, checkLicense, async (req, res) => {
     }
 });
 
+
+// ===== FATIA 3: devolver o mapa de status consolidado de uma carga =====
+// O app manda o loadId (via URL) e recebe todas as parcelas já feitas/recusadas,
+// de todas as equipes, pra pintar o mapa dele (verde/azul/amarelo).
+app.get('/api/app/os/status/:loadId', auth, checkLicense, async (req, res) => {
+    try {
+        const os = await OrdemServico.findOne({
+            companyId: req.user.companyId,
+            loadId: req.params.loadId
+        });
+        // Se ainda não há O.S. dessa carga, não há status — devolve lista vazia (não é erro).
+        if (!os) {
+            return res.json({ success: true, existeOS: false, statuses: [] });
+        }
+        // Só devolve as parcelas que já têm situação (feita/recusada). As pendentes ficam de fora.
+        const statuses = os.parcelas
+            .filter(p => p.situacao === 'feita' || p.situacao === 'recusada')
+            .map(p => ({
+                chave: p.chave,
+                situacao: p.situacao,
+                lider: p.lider || null,
+                dataHora: p.dataHora || null,
+                motivo: p.motivo || ''
+            }));
+        res.json({
+            success: true,
+            existeOS: true,
+            osId: os._id,
+            total: statuses.length,
+            statuses
+        });
+    } catch (error) {
+        console.error('Erro ao devolver status:', error);
+        res.status(500).json({ success: false, message: 'Erro: ' + error.message });
+    }
+});
+
 // ===== FATIA 3: receber o mapa de status das equipes =====
 // O app manda { loadId, statuses: [{ chave, situacao, lider, dataHora, motivo }] }.
 // O servidor acha a O.S. daquela carga (cria se não existir) e pinta as parcelas.
