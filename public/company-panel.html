@@ -99,6 +99,8 @@
   .carga .tit{font-weight:600;font-size:14px}
   .carga small{color:var(--tinta-3);font-size:12px}
   .pill{font-size:11px;padding:2px 8px;border-radius:5px;background:var(--papel-2);color:var(--tinta-3)}
+
+    .os-filtro.on{background:var(--mata);color:#fff}
 </style>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -211,6 +213,11 @@
         Ordens de Serviço
         <button class="btn btn-sm btn-ghost" onclick="loadOrdens()">Atualizar</button>
       </h3>
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <button class="btn btn-sm os-filtro on" data-estado="ativa" onclick="trocarEstadoOS('ativa')">Ativas</button>
+        <button class="btn btn-sm os-filtro btn-ghost" data-estado="desativada" onclick="trocarEstadoOS('desativada')">Desativadas</button>
+        <button class="btn btn-sm os-filtro btn-ghost" data-estado="concluida" onclick="trocarEstadoOS('concluida')">Concluídas</button>
+      </div>
       <div id="osList"><p class="vazio">Carregando…</p></div>
     </div>
     <div id="osDetalhe"></div>
@@ -314,26 +321,59 @@ async function deleteDevice(id){
 }
 
 // ===== ORDENS DE SERVIÇO =====
+let osEstadoAtual = 'ativa'; // qual aba de estado está selecionada
+
+function trocarEstadoOS(estado){
+  osEstadoAtual = estado;
+  // atualiza o visual dos botões de filtro
+  document.querySelectorAll('.os-filtro').forEach(b=>{
+    b.classList.toggle('on', b.dataset.estado === estado);
+  });
+  loadOrdens();
+}
+
 async function loadOrdens(){
   try{
-    const r = await fetch('/api/admin/os',{headers:H()});
+    const r = await fetch('/api/admin/os?estado=' + osEstadoAtual,{headers:H()});
     const d = await r.json();
     const box = document.getElementById('osList');
     if(d.success && d.ordens && d.ordens.length){
-      box.innerHTML = d.ordens.map(os=>`
+      box.innerHTML = d.ordens.map(os=>{
+        // botões de mudar estado conforme o estado atual
+        let acoes = `<button class="btn btn-sm" onclick="abrirOS('${os.id}')">Abrir</button>`;
+        if(os.estado === 'ativa'){
+          acoes += ` <button class="btn btn-sm btn-ghost" onclick="mudarEstadoOS('${os.id}','concluida')">Concluir</button>`;
+        }else{
+          acoes += ` <button class="btn btn-sm btn-ghost" onclick="mudarEstadoOS('${os.id}','ativa')">Reativar</button>`;
+        }
+        return `
         <div class="carga">
           <div>
             <div class="tit">${os.nome||''}</div>
             <small>${os.totalParcelas} parcela(s) · criada em ${new Date(os.criadaEm).toLocaleDateString('pt-BR')}</small>
           </div>
-          <div style="white-space:nowrap;text-align:right">
-            <button class="btn btn-sm" onclick="abrirOS('${os.id}')">Abrir</button>
-          </div>
-        </div>`).join('');
+          <div style="white-space:nowrap;text-align:right">${acoes}</div>
+        </div>`;
+      }).join('');
     }else{
-      box.innerHTML = '<p class="vazio">Nenhuma O.S. criada ainda. Crie uma a partir de uma carga de parcelas na aba "Cargas & Sincronização".</p>';
+      const vazios = { ativa:'Nenhuma O.S. ativa.', desativada:'Nenhuma O.S. desativada.', concluida:'Nenhuma O.S. concluída.' };
+      box.innerHTML = '<p class="vazio">' + (vazios[osEstadoAtual]||'Nenhuma O.S.') + '</p>';
     }
   }catch(e){ document.getElementById('osList').innerHTML='<p class="vazio">Erro ao carregar ordens de serviço.</p>'; }
+}
+
+async function mudarEstadoOS(id, estado){
+  const msg = estado === 'concluida' ? 'Concluir esta O.S.?' : 'Reativar esta O.S.?';
+  if(!confirm(msg)) return;
+  try{
+    const r = await fetch('/api/admin/os/' + id + '/estado', {
+      method:'PUT', headers:{...H(),'Content-Type':'application/json'},
+      body: JSON.stringify({ estado })
+    });
+    const d = await r.json();
+    if(d.success){ loadOrdens(); document.getElementById('osDetalhe').innerHTML=''; }
+    else alert(d.message||'Erro ao mudar estado');
+  }catch(e){ alert('Erro ao mudar estado'); }
 }
 
 let osMapa = null; // guarda a instância do mapa pra poder recriar ao trocar de O.S.
