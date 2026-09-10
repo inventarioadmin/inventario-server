@@ -810,7 +810,7 @@ app.post('/api/mobile/login', async (req, res) => {
         const token = jwt.sign(
             { companyId: company._id, androidId, type: 'mobile' },
             process.env.JWT_SECRET,
-            { expiresIn: '30d' }
+            { expiresIn: '365d' }
         );
 
         res.json({ success: true, token });
