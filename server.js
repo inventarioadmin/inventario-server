@@ -71,6 +71,7 @@ const osSchema = new mongoose.Schema({
     loadId: { type: mongoose.Schema.Types.ObjectId, ref: 'Load', required: true },
     nome: { type: String, required: true },        // nome da O.S. (começa igual ao nome da carga)
     criadaEm: { type: Date, default: Date.now },
+    estado: { type: String, enum: ['ativa', 'desativada', 'concluida'], default: 'ativa' }, // NOVO
     totalParcelas: { type: Number, default: 0 },
     // A lista de parcelas da O.S. Nesta fatia só guardamos a chave e os campos de origem.
     // Os campos de status (coletor, dataHora, situação) entram na Fatia 2.
@@ -1316,6 +1317,29 @@ app.post('/api/app/os/status', auth, checkLicense, async (req, res) => {
     }
 });
 
+// ===== BLOCO B: mudar o estado de uma O.S. (ativa / desativada / concluida) =====
+app.put('/api/admin/os/:osId/estado', auth, checkLicense, async (req, res) => {
+    try {
+        const { estado } = req.body;
+        if (!['ativa', 'desativada', 'concluida'].includes(estado)) {
+            return res.status(400).json({ success: false, message: 'Estado inválido' });
+        }
+        const os = await OrdemServico.findOne({
+            _id: req.params.osId,
+            companyId: req.user.companyId
+        });
+        if (!os) {
+            return res.status(404).json({ success: false, message: 'O.S. não encontrada' });
+        }
+        os.estado = estado;
+        await os.save();
+        res.json({ success: true, osId: os._id, estado: os.estado });
+    } catch (error) {
+        console.error('Erro ao mudar estado da O.S.:', error);
+        res.status(500).json({ success: false, message: 'Erro: ' + error.message });
+    }
+});
+
 // ===== FATIA 2: excluir uma O.S. =====
 app.delete('/api/admin/os/:osId', auth, checkLicense, async (req, res) => {
     try {
@@ -1334,11 +1358,15 @@ app.delete('/api/admin/os/:osId', auth, checkLicense, async (req, res) => {
     }
 });
 
-// ===== FATIA 1 - Passo 2: listar as O.S. já criadas (pra conferência) =====
+// ===== FATIA 1 - Passo 2 (+ Bloco B): listar O.S., com estado e filtro opcional =====
 app.get('/api/admin/os', auth, checkLicense, async (req, res) => {
     try {
-        const lista = await OrdemServico.find({ companyId: req.user.companyId })
-            .sort({ criadaEm: -1 });
+        // filtro opcional por estado: /api/admin/os?estado=ativa (ou desativada, concluida)
+        const filtro = { companyId: req.user.companyId };
+        if (req.query.estado && ['ativa', 'desativada', 'concluida'].includes(req.query.estado)) {
+            filtro.estado = req.query.estado;
+        }
+        const lista = await OrdemServico.find(filtro).sort({ criadaEm: -1 });
         res.json({
             success: true,
             total: lista.length,
@@ -1346,6 +1374,7 @@ app.get('/api/admin/os', auth, checkLicense, async (req, res) => {
                 id: os._id,
                 nome: os.nome,
                 criadaEm: os.criadaEm,
+                estado: os.estado || 'ativa', // O.S. antigas sem estado contam como ativa
                 totalParcelas: os.totalParcelas
             }))
         });
@@ -1428,6 +1457,12 @@ app.put('/api/admin/loads/:loadId/toggle', auth, checkLicense, async (req, res) 
         load.isActive = !load.isActive;
         await load.save();
 
+        // NOVO: acompanha a O.S. — carga desativada => O.S. desativada; carga reativada => O.S. volta a ativa
+        await OrdemServico.updateMany(
+            { companyId: req.user.companyId, loadId: load._id },
+            { $set: { estado: load.isActive ? 'ativa' : 'desativada' } }
+        );
+
         res.json({
             success: true,
             message: `Carga ${load.isActive ? 'ativada' : 'desativada'} com sucesso`,
@@ -1481,6 +1516,12 @@ app.delete('/api/admin/loads/:loadId', auth, checkLicense, async (req, res) => {
         if (!load) {
             return res.status(404).json({ success: false, message: 'Carga não encontrada' });
         }
+
+        // NOVO: a O.S. dessa carga vai para "desativada" (não some — preserva o histórico)
+        await OrdemServico.updateMany(
+            { companyId: req.user.companyId, loadId: load._id },
+            { $set: { estado: 'desativada' } }
+        );
 
         // Remove o arquivo físico
         const filePath = path.join(__dirname, 'loads', req.user.companyId.toString(), load.filename);
