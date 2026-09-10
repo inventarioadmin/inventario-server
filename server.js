@@ -1317,6 +1317,50 @@ app.post('/api/app/os/status', auth, checkLicense, async (req, res) => {
     }
 });
 
+// ===== BLOCO B: baixar planilha (CSV) dos status de uma O.S. =====
+app.get('/api/admin/os/:osId/planilha', auth, checkLicense, async (req, res) => {
+    try {
+        const os = await OrdemServico.findOne({
+            _id: req.params.osId,
+            companyId: req.user.companyId
+        });
+        if (!os) {
+            return res.status(404).json({ success: false, message: 'O.S. não encontrada' });
+        }
+        // Escapa ; e aspas pra não quebrar o CSV
+        const esc = (v) => {
+            const s = (v === undefined || v === null) ? '' : String(v);
+            return s.includes(';') || s.includes('"') ? '"' + s.replace(/"/g, '""') + '"' : s;
+        };
+        const traduzSituacao = (s) => {
+            if (s === 'feita') return 'Feita';
+            if (s === 'recusada') return 'Recusada';
+            return 'Pendente';
+        };
+        let csv = 'Numero Parcela;Projeto;Fazenda;Talhao;Situacao;Lider;Data;Motivo Recusa\n';
+        for (const p of os.parcelas) {
+            csv += [
+                esc(p.numero),
+                esc(p.projeto),
+                esc(p.fazenda),
+                esc(p.talhao),
+                esc(traduzSituacao(p.situacao)),
+                esc(p.lider || ''),
+                esc(p.dataHora || ''),
+                esc(p.motivo || '')
+            ].join(';') + '\n';
+        }
+        // nome do arquivo: usa o nome da O.S., limpo
+        const nomeLimpo = (os.nome || 'os').replace(/[^a-zA-Z0-9]+/g, '_').replace(/_+$/,'');
+        res.setHeader('Content-Disposition', 'attachment; filename="status_' + nomeLimpo + '.csv"');
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.send('\uFEFF' + csv); // BOM pra o Excel abrir com acento certo
+    } catch (error) {
+        console.error('Erro ao gerar planilha da O.S.:', error);
+        res.status(500).json({ success: false, message: 'Erro: ' + error.message });
+    }
+});
+
 // ===== BLOCO B: mudar o estado de uma O.S. (ativa / desativada / concluida) =====
 app.put('/api/admin/os/:osId/estado', auth, checkLicense, async (req, res) => {
     try {

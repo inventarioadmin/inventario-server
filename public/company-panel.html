@@ -362,6 +362,19 @@ async function loadOrdens(){
   }catch(e){ document.getElementById('osList').innerHTML='<p class="vazio">Erro ao carregar ordens de serviço.</p>'; }
 }
 
+async function baixarPlanilhaOS(id){
+  try{
+    const r = await fetch('/api/admin/os/' + id + '/planilha', { headers: H() });
+    if(!r.ok){ const d = await r.json(); return alert(d.message||'Erro ao baixar planilha'); }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (r.headers.get('Content-Disposition')||'').split('filename=')[1]?.replace(/"/g,'') || 'status_os.csv';
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  }catch(e){ alert('Erro ao baixar planilha'); }
+}
+
 async function mudarEstadoOS(id, estado){
   const msg = estado === 'concluida' ? 'Concluir esta O.S.?' : 'Reativar esta O.S.?';
   if(!confirm(msg)) return;
@@ -423,7 +436,10 @@ async function abrirOS(id){
 
     box.innerHTML = `
       <div class="secao">
-        <h3 style="margin-bottom:4px">${os.nome}</h3>
+        <h3 style="margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">
+          ${os.nome}
+          <button class="btn btn-sm" onclick="baixarPlanilhaOS('${os.id}')">Baixar planilha</button>
+        </h3>
         <small style="color:var(--tinta-3)">Criada em ${new Date(os.criadaEm).toLocaleDateString('pt-BR')}</small>
       </div>
       <div class="secao">
