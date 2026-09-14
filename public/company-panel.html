@@ -504,6 +504,41 @@ function desenharMapa(pontos){
   setTimeout(()=>{ if(osMapa) osMapa.invalidateSize(); }, 200);
 }
 
+// ===== ORGANIZAÇÃO: definir a regional de um UA =====
+async function definirRegional(uaId, contratante){
+  try{
+    // busca as regionais já usadas para este contratante
+    let jaUsadas = [];
+    if(contratante){
+      const rr = await (await fetch('/api/admin/regionais/'+encodeURIComponent(contratante),{headers:H()})).json();
+      if(rr.success) jaUsadas = rr.regionais || [];
+    }
+    let msg = 'Contratante: ' + (contratante||'(desconhecido)') + '\n\n';
+    if(jaUsadas.length){
+      msg += 'Regionais já usadas:\n' + jaUsadas.map((r,i)=>(i+1)+') '+r).join('\n') + '\n\n';
+      msg += 'Digite o número de uma da lista, OU escreva uma regional nova:';
+    }else{
+      msg += 'Nenhuma regional ainda para este contratante.\nEscreva a regional (ex: PR, SC):';
+    }
+    let resp = prompt(msg);
+    if(resp === null) return;
+    resp = resp.trim();
+    if(resp === '') return;
+    // se digitou um número que corresponde a uma da lista, usa ela
+    const n = parseInt(resp);
+    let regional = resp;
+    if(!isNaN(n) && n >= 1 && n <= jaUsadas.length && String(n) === resp){
+      regional = jaUsadas[n-1];
+    }
+    const r = await (await fetch('/api/admin/loads/'+uaId+'/regional',{
+      method:'PUT', headers:{...H(),'Content-Type':'application/json'},
+      body: JSON.stringify({ regional })
+    })).json();
+    if(r.success){ loadCargas(); }
+    else alert(r.message||'Erro ao definir regional');
+  }catch(e){ alert('Erro ao definir regional'); }
+}
+
 // ===== UNIFICAÇÃO: vincular parâmetro a um UA =====
 async function abrirVincular(uaId){
   try{
@@ -558,8 +593,10 @@ async function loadCargas(){
           <div style="white-space:nowrap;text-align:right">
             <span class="pill">${l.isActive?'ativa':'inativa'}</span>
             ${l.type==='parcelas'?`<span class="pill" style="${l.parametroVinculado?'background:#e2efe4;color:var(--verde)':'background:#f2dede;color:var(--vermelho)'}">${l.parametroVinculado?'com parâmetro':'sem parâmetro'}</span>`:''}
+            ${l.type==='parcelas'?`<span class="pill" style="background:var(--papel-2);color:var(--tinta-3)">${l.regional?('regional: '+l.regional):'sem regional'}</span>`:''}
             ${l.type==='parcelas'?`<button class="btn btn-sm" onclick="criarOS('${l.id}')">Criar O.S.</button>`:''}
             ${l.type==='parcelas'?`<button class="btn btn-sm btn-ghost" onclick="abrirVincular('${l.id}')">Parâmetro</button>`:''}
+            ${l.type==='parcelas'?`<button class="btn btn-sm btn-ghost" onclick="definirRegional('${l.id}','${(l.contratante||'').replace(/'/g,'')}')">Regional</button>`:''}
             <button class="btn btn-sm btn-ghost" onclick="toggleLoad('${l.id}')">${l.isActive?'Desativar':'Ativar'}</button>
             <button class="btn btn-sm btn-perigo" onclick="deleteLoad('${l.id}')">Excluir</button>
           </div>
