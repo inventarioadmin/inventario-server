@@ -1033,6 +1033,83 @@ app.get('/api/mobile/sync/loads', mobileAuth, checkLicense, async (req, res) => 
     }
 });
 
+// ===== UNIFICAÇÃO: listar cargas de parcelas pro app, com status de parâmetro =====
+app.get('/api/mobile/sync/cargas-unificadas', mobileAuth, checkLicense, async (req, res) => {
+    try {
+        const uas = await Load.find({
+            companyId: req.user.companyId,
+            isActive: true,
+            type: 'parcelas'
+        }).sort({ uploadDate: -1 });
+
+        const lista = uas.map(ua => ({
+            id: ua._id,
+            description: ua.description || ua.originalName,
+            version: ua.version,
+            uploadDate: ua.uploadDate,
+            temParametro: !!ua.parametroVinculado, // o app bloqueia os sem parâmetro
+            parametroId: ua.parametroVinculado || null
+        }));
+
+        res.json({ success: true, cargas: lista });
+    } catch (error) {
+        console.error('Erro ao listar cargas unificadas:', error);
+        res.status(500).json({ success: false, message: 'Erro ao listar cargas' });
+    }
+});
+
+// ===== UNIFICAÇÃO: baixar UA + parâmetro casados, num pacote só (lê do Mongo) =====
+app.get('/api/mobile/sync/carga-unificada/:loadId', mobileAuth, checkLicense, async (req, res) => {
+    try {
+        const ua = await Load.findOne({
+            _id: req.params.loadId,
+            companyId: req.user.companyId,
+            isActive: true,
+            type: 'parcelas'
+        });
+        if (!ua) {
+            return res.status(404).json({ success: false, message: 'Carga não encontrada' });
+        }
+        if (!ua.parametroVinculado) {
+            return res.status(400).json({ success: false, message: 'Esta carga não tem parâmetro vinculado' });
+        }
+        const prmt = await Load.findOne({
+            _id: ua.parametroVinculado,
+            companyId: req.user.companyId
+        });
+        if (!prmt) {
+            return res.status(404).json({ success: false, message: 'Parâmetro vinculado não encontrado' });
+        }
+
+        // Registra o download (igual ao fluxo antigo faz)
+        try {
+            const syncLog = new SyncLog({
+                companyId: req.user.companyId,
+                androidId: req.user.androidId,
+                type: 'download',
+                filename: ua.originalName,
+                fileSize: ua.fileSize || 0
+            });
+            await syncLog.save();
+        } catch (e) { /* log não é crítico */ }
+
+        res.json({
+            success: true,
+            parcelas: {
+                nome: ua.originalName,
+                conteudo: ua.conteudo || ''   // CSV das parcelas, do Mongo
+            },
+            parametro: {
+                nome: prmt.originalName,
+                conteudo: prmt.conteudo || ''  // CSV do parâmetro, do Mongo
+            }
+        });
+    } catch (error) {
+        console.error('Erro ao baixar carga unificada:', error);
+        res.status(500).json({ success: false, message: 'Erro: ' + error.message });
+    }
+});
+
 // 3. DOWNLOAD DE CARGA (do servidor para app)
 app.get('/api/mobile/sync/download/:loadId', mobileAuth, checkLicense, async (req, res) => {
     try {
