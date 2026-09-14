@@ -913,7 +913,8 @@ app.get('/api/app/sync/loads', auth, checkLicense, async (req, res) => {
             description: load.description || load.originalName,
             version: load.version,
             uploadDate: load.uploadDate,
-            size: load.fileSize || 0
+            size: load.fileSize || 0,
+            temParametro: load.type === 'parcelas' ? !!load.parametroVinculado : true
         }));
 
         res.json({
