@@ -145,6 +145,38 @@
   background:var(--papel-2);
   color:var(--tinta-3);
   }
+  
+  .grupo-cargas{
+  margin-bottom:20px;
+  }
+
+  .grupo-cargas:last-child{
+  margin-bottom:0;
+  }
+
+  .grupo-cargas-titulo{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  font-size:13px;
+  font-weight:600;
+  color:var(--mata);
+  text-transform:uppercase;
+  letter-spacing:.03em;
+  padding:4px 2px 8px;
+  margin-bottom:8px;
+  border-bottom:1px solid var(--linha);
+  }
+
+  .grupo-cargas-titulo span{
+  min-width:24px;
+  text-align:center;
+  font-size:11px;
+  background:var(--papel-2);
+  color:var(--tinta-3);
+  padding:2px 7px;
+  border-radius:20px;
+  }
 
     .os-filtro.on{background:var(--mata);color:#fff}
 </style>
@@ -632,8 +664,13 @@ async function loadCargas(){
     const r = await fetch('/api/admin/loads',{headers:H()});
     const d = await r.json();
     const box = document.getElementById('loadsList');
+
     if(d.success && d.loads.length){
-      box.innerHTML = d.loads.map(l=>`
+
+      const uas = d.loads.filter(l => l.type === 'parcelas');
+      const parametros = d.loads.filter(l => l.type === 'parametros');
+
+      const renderCarga = l => `
         <div class="carga">
 
           <div>
@@ -666,7 +703,33 @@ async function loadCargas(){
             <button class="btn btn-sm btn-perigo" onclick="deleteLoad('${l.id}')">Excluir</button>
           </div>
 
-        </div>`).join('');
+        </div>`;
+
+        const blocoUA = `
+          <div class="grupo-cargas">
+            <div class="grupo-cargas-titulo">
+              Unidades de Amostra — UA
+              <span>${uas.length}</span>
+            </div>
+            ${uas.length
+              ? uas.map(renderCarga).join('')
+              : '<p class="vazio">Nenhuma UA disponível.</p>'}
+          </div>
+        `;
+
+        const blocoParametros = `
+          <div class="grupo-cargas">
+            <div class="grupo-cargas-titulo">
+              Parâmetros — PRMT
+              <span>${parametros.length}</span>
+            </div>
+            ${parametros.length
+              ? parametros.map(renderCarga).join('')
+              : '<p class="vazio">Nenhum parâmetro disponível.</p>'}
+          </div>
+        `;
+
+        box.innerHTML = blocoUA + blocoParametros;
     }else{
       box.innerHTML = '<p class="vazio">Nenhuma carga enviada ainda. Use o formulário ao lado.</p>';
     }
