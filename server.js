@@ -319,7 +319,7 @@ app.post('/api/login', async (req, res) => {
                     const token = jwt.sign(
                         { companyId: company._id, role: 'admin' },
                         process.env.JWT_SECRET,
-                        { expiresIn: '24h' }
+                        { expiresIn: '365d' } // NOVO: 365 dias em vez de 24h, evita o 401 recorrente no campo
                     );
                     console.log('Login successful, token generated');
                     return res.json({
