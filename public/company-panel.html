@@ -48,7 +48,68 @@
   .empresa .metrica small{color:#b6cdbc;font-size:12px}
   #warningArea:empty{display:none}
   .aviso{background:var(--amarelo);color:#3a2c07;padding:10px 16px;border-radius:8px;
-         margin-bottom:18px;font-size:14px}
+        margin-bottom:18px;font-size:14px}
+
+  /* Resumo gerencial */
+  .dashboard-resumo{
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:12px;
+    margin:18px 0 8px;
+  }
+
+  .dash-card{
+    background:#fff;
+    border:1px solid var(--linha);
+    border-radius:10px;
+    padding:16px 18px;
+  }
+
+  .dash-num{
+    font-family:Fraunces,Georgia,serif;
+    font-size:28px;
+    font-weight:600;
+    line-height:1.1;
+    color:var(--mata);
+  }
+
+  .dash-label{
+    margin-top:5px;
+    font-size:12px;
+    color:var(--tinta-3);
+  }
+
+  .dash-card.pendentes .dash-num{
+    color:var(--vermelho);
+  }
+
+  .dash-card.equipes .dash-num{
+    color:var(--azul);
+  }
+
+  .dash-card.alerta .dash-num{
+    color:var(--amarelo);
+  }
+
+  #dashboardAlerta:empty{
+    display:none;
+  }
+
+  .dashboard-alerta{
+    margin-top:10px;
+    padding:9px 13px;
+    border-radius:7px;
+    background:#fff4d6;
+    border:1px solid #e6ca7a;
+    color:#665015;
+    font-size:13px;
+  }
+
+  @media(max-width:820px){
+    .dashboard-resumo{
+      grid-template-columns:1fr 1fr;
+    }
+  }
 
   /* Abas */
   .abas{display:flex;gap:2px;margin:22px 0 0}
@@ -199,6 +260,30 @@
   </div>
   <div id="warningArea"></div>
 
+  <div class="dashboard-resumo">
+    <div class="dash-card">
+      <div class="dash-num" id="dashOSAtivas">—</div>
+      <div class="dash-label">O.S. ativas</div>
+    </div>
+
+    <div class="dash-card pendentes">
+      <div class="dash-num" id="dashPendentes">—</div>
+      <div class="dash-label">Parcelas pendentes</div>
+    </div>
+
+    <div class="dash-card equipes">
+      <div class="dash-num" id="dashEquipesHoje">—</div>
+      <div class="dash-label">Equipes hoje</div>
+    </div>
+
+    <div class="dash-card alerta">
+      <div class="dash-num" id="dashSemParametro">—</div>
+      <div class="dash-label">Cargas sem parâmetro</div>
+    </div>
+  </div>
+
+  <div id="dashboardAlerta"></div>
+
   <div class="abas">
     <button class="aba on" data-alvo="pDispositivos">Dispositivos</button>
     <button class="aba" data-alvo="pSync">Cargas &amp; Sincronização</button>
@@ -311,6 +396,50 @@ const H = () => ({ 'Authorization': 'Bearer ' + TOKEN() });
 
 function checkAuth(){ if(!TOKEN()){ location.href='/'; return false; } return true; }
 function logout(){ localStorage.removeItem('authToken'); location.href='/'; }
+
+// ===== RESUMO GERENCIAL =====
+async function loadDashboardResumo(){
+  try{
+    const r = await fetch('/api/admin/dashboard-resumo',{headers:H()});
+
+    if(r.status===401) return logout();
+
+    const d = await r.json();
+
+    if(!d.success || !d.resumo) return;
+
+    const resumo = d.resumo;
+
+    document.getElementById('dashOSAtivas').textContent =
+      resumo.osAtivas ?? 0;
+
+    document.getElementById('dashPendentes').textContent =
+      resumo.parcelasPendentes ?? 0;
+
+    document.getElementById('dashEquipesHoje').textContent =
+      resumo.equipesHoje ?? 0;
+
+    document.getElementById('dashSemParametro').textContent =
+      resumo.cargasSemParametro ?? 0;
+
+    const alerta = document.getElementById('dashboardAlerta');
+
+    if((resumo.cargasSemParametro ?? 0) > 0){
+      const qtd = resumo.cargasSemParametro;
+
+      alerta.innerHTML = `
+        <div class="dashboard-alerta">
+          ⚠ ${qtd} carga${qtd > 1 ? 's ativas precisam' : ' ativa precisa'} de parâmetro antes do uso em campo.
+        </div>
+      `;
+    }else{
+      alerta.innerHTML = '';
+    }
+
+  }catch(e){
+    console.error('Erro ao carregar resumo gerencial:', e);
+  }
+}
 
 // Abas
 document.querySelectorAll('.aba').forEach(b=>{
@@ -828,7 +957,11 @@ function formatSize(b){
 }
 
 // Início
-if(checkAuth()){ loadCompanyInfo(); loadDevices(); }
+if(checkAuth()){
+  loadCompanyInfo();
+  loadDevices();
+  loadDashboardResumo();
+}
 </script>
 </body>
 </html>
