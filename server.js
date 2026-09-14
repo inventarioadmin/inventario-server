@@ -1703,6 +1703,32 @@ app.put('/api/admin/loads/:loadId/toggle', auth, checkLicense, async (req, res) 
     }
 });
 
+// ===== LIMPEZA: excluir um registro de exportação/sync =====
+app.delete('/api/admin/sync/history/:syncId', auth, checkLicense, async (req, res) => {
+    try {
+        const log = await SyncLog.findOne({ _id: req.params.syncId, companyId: req.user.companyId });
+        if (!log) {
+            return res.status(404).json({ success: false, message: 'Registro não encontrado' });
+        }
+        await log.deleteOne();
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Erro ao excluir registro:', error);
+        res.status(500).json({ success: false, message: 'Erro: ' + error.message });
+    }
+});
+
+// ===== LIMPEZA: apagar todos os registros de DOWNLOAD (os "Baixado", que só poluem) =====
+app.delete('/api/admin/sync/history-downloads', auth, checkLicense, async (req, res) => {
+    try {
+        const r = await SyncLog.deleteMany({ companyId: req.user.companyId, type: 'download' });
+        res.json({ success: true, apagados: r.deletedCount });
+    } catch (error) {
+        console.error('Erro ao limpar downloads:', error);
+        res.status(500).json({ success: false, message: 'Erro: ' + error.message });
+    }
+});
+
 // 7. HISTÓRICO DE SINCRONIZAÇÕES
 app.get('/api/admin/sync/history', auth, checkLicense, async (req, res) => {
     try {
