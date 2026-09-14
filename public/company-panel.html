@@ -121,13 +121,21 @@
   font-size:12px;
   }
 
-  .carga > div:last-child{
+  .carga-status{
   display:flex;
   flex-wrap:wrap;
   align-items:center;
   gap:6px;
-  white-space:normal !important;
-  text-align:left !important;
+  margin:10px 0;
+  }
+
+  .carga-acoes{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:6px;
+  padding-top:10px;
+  border-top:1px solid var(--papel-2);
   }
 
   .pill{
@@ -627,20 +635,37 @@ async function loadCargas(){
     if(d.success && d.loads.length){
       box.innerHTML = d.loads.map(l=>`
         <div class="carga">
+
           <div>
             <div class="tit">${l.type==='parcelas'?'Parcelas':'Parâmetros'} — ${l.description||l.originalName||''}</div>
             <small>${l.version||''} · ${new Date(l.uploadDate).toLocaleDateString('pt-BR')}</small>
           </div>
-          <div style="white-space:nowrap;text-align:right">
+
+          <div class="carga-status">
             <span class="pill">${l.isActive?'ativa':'inativa'}</span>
-            ${l.type==='parcelas'?`<span class="pill" style="${l.parametroVinculado?'background:#e2efe4;color:var(--verde)':'background:#f2dede;color:var(--vermelho)'}">${l.parametroVinculado?'com parâmetro':'sem parâmetro'}</span>`:''}
-            ${l.type==='parcelas'?`<span class="pill" style="background:var(--papel-2);color:var(--tinta-3)">${l.regional?('regional: '+l.regional):'sem regional'}</span>`:''}
+
+            ${l.type==='parcelas'?`
+              <span class="pill" style="${l.parametroVinculado?'background:#e2efe4;color:var(--verde)':'background:#f2dede;color:var(--vermelho)'}">
+                ${l.parametroVinculado?'com parâmetro':'sem parâmetro'}
+              </span>
+            `:''}
+
+            ${l.type==='parcelas'?`
+              <span class="pill" style="background:var(--papel-2);color:var(--tinta-3)">
+                ${l.regional?('regional: '+l.regional):'sem regional'}
+              </span>
+            `:''}
+          </div>
+
+          <div class="carga-acoes">
             ${l.type==='parcelas'?`<button class="btn btn-sm" onclick="criarOS('${l.id}')">Criar O.S.</button>`:''}
             ${l.type==='parcelas'?`<button class="btn btn-sm btn-ghost" onclick="abrirVincular('${l.id}')">Parâmetro</button>`:''}
             ${l.type==='parcelas'?`<button class="btn btn-sm btn-ghost" onclick="definirRegional('${l.id}','${(l.contratante||'').replace(/'/g,'')}')">Regional</button>`:''}
+
             <button class="btn btn-sm btn-ghost" onclick="toggleLoad('${l.id}')">${l.isActive?'Desativar':'Ativar'}</button>
             <button class="btn btn-sm btn-perigo" onclick="deleteLoad('${l.id}')">Excluir</button>
           </div>
+
         </div>`).join('');
     }else{
       box.innerHTML = '<p class="vazio">Nenhuma carga enviada ainda. Use o formulário ao lado.</p>';
