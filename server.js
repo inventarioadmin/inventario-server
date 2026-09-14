@@ -58,6 +58,7 @@ const loadSchema = new mongoose.Schema({
     uploadedBy: { type: String },
     uploadDate: { type: Date, default: Date.now },
     isActive: { type: Boolean, default: true },
+    parametroVinculado: { type: mongoose.Schema.Types.ObjectId, ref: 'Load', default: null }, // NOVO: qual PRMT este UA usa
     version: { type: String, required: true },
     fileSize: { type: Number, default: 0 },
     conteudo: { type: String, default: '' } // NOVO: o texto do CSV guardado no banco
@@ -1483,6 +1484,38 @@ app.get('/api/admin/loads', auth, checkLicense, async (req, res) => {
     } catch (error) {
         console.error('Erro ao listar cargas:', error);
         res.status(500).json({ success: false, message: 'Erro ao listar cargas' });
+    }
+});
+
+// ===== UNIFICAÇÃO: vincular (ou desvincular) um parâmetro a um UA =====
+app.put('/api/admin/loads/:loadId/vincular-parametro', auth, checkLicense, async (req, res) => {
+    try {
+        const { parametroId } = req.body; // id do PRMT, ou null pra desvincular
+        const ua = await Load.findOne({ _id: req.params.loadId, companyId: req.user.companyId });
+        if (!ua) {
+            return res.status(404).json({ success: false, message: 'Carga (UA) não encontrada' });
+        }
+        if (ua.type !== 'parcelas') {
+            return res.status(400).json({ success: false, message: 'Só cargas de parcelas podem receber parâmetro' });
+        }
+        if (parametroId) {
+            // valida que o parâmetro existe e é do tipo certo
+            const prmt = await Load.findOne({ _id: parametroId, companyId: req.user.companyId });
+            if (!prmt) {
+                return res.status(404).json({ success: false, message: 'Parâmetro não encontrado' });
+            }
+            if (prmt.type !== 'parametros') {
+                return res.status(400).json({ success: false, message: 'A carga escolhida não é um parâmetro' });
+            }
+            ua.parametroVinculado = prmt._id;
+        } else {
+            ua.parametroVinculado = null; // desvincular
+        }
+        await ua.save();
+        res.json({ success: true, loadId: ua._id, parametroVinculado: ua.parametroVinculado });
+    } catch (error) {
+        console.error('Erro ao vincular parâmetro:', error);
+        res.status(500).json({ success: false, message: 'Erro: ' + error.message });
     }
 });
 
