@@ -1477,7 +1477,8 @@ app.get('/api/admin/loads', auth, checkLicense, async (req, res) => {
                 uploadDate: load.uploadDate,
                 uploadedBy: load.uploadedBy,
                 isActive: load.isActive,
-                fileSize: load.fileSize
+                fileSize: load.fileSize,
+                parametroVinculado: load.parametroVinculado || null
             }))
         });
 
