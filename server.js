@@ -1577,7 +1577,9 @@ app.get('/api/admin/loads', auth, checkLicense, async (req, res) => {
                 uploadedBy: load.uploadedBy,
                 isActive: load.isActive,
                 fileSize: load.fileSize,
-                parametroVinculado: load.parametroVinculado || null
+                parametroVinculado: load.parametroVinculado || null,
+                regional: load.regional || '',
+                contratante: load.type === 'parcelas' ? (extrairClassificacao(load.conteudo).contratante || '') : ''
             }))
         });
 
