@@ -59,6 +59,7 @@ const loadSchema = new mongoose.Schema({
     uploadDate: { type: Date, default: Date.now },
     isActive: { type: Boolean, default: true },
     parametroVinculado: { type: mongoose.Schema.Types.ObjectId, ref: 'Load', default: null }, // NOVO: qual PRMT este UA usa
+    regional: { type: String, default: '' }, // NOVO: regional digitada (ex: PR, SC)
     version: { type: String, required: true },
     fileSize: { type: Number, default: 0 },
     conteudo: { type: String, default: '' } // NOVO: o texto do CSV guardado no banco
@@ -100,6 +101,26 @@ const OrdemServico = mongoose.model('OrdemServico', osSchema);
 function montarChaveParcela(projeto, fazenda, talhao, numero) {
     const limpar = (s) => (s || '').toString().trim().toUpperCase().replace(/\s+/g, ' ');
     return [limpar(projeto), limpar(fazenda), limpar(talhao), limpar(numero)].join('|');
+}
+
+// ===== ORGANIZAÇÃO: extrai contratante e atividade(projeto) da 1ª linha de dados do UA =====
+function extrairClassificacao(conteudoCsv) {
+    const vazio = { contratante: '', atividade: '' };
+    if (!conteudoCsv || !conteudoCsv.trim()) return vazio;
+    let texto = conteudoCsv.replace(/^\uFEFF/, '');
+    const linhas = texto.split(/\r?\n/).filter(l => l.trim() !== '');
+    if (linhas.length < 2) return vazio;
+    const semAcento = (s) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const cabecalho = linhas[0].split(';').map(h => semAcento(h.trim().toLowerCase()));
+    const acharCol = (nome) => cabecalho.findIndex(h => h.includes(nome));
+    const iContratante = acharCol('contratante');
+    const iProjeto = acharCol('projeto');
+    const campos = linhas[1].split(';'); // 1ª linha de dados (carga é toda do mesmo contratante/projeto)
+    const pega = (idx) => (idx >= 0 && campos[idx] ? campos[idx].trim() : '');
+    return {
+        contratante: pega(iContratante),
+        atividade: pega(iProjeto)
+    };
 }
 
 // Lê o texto do CSV de uma carga de parcelas e devolve a lista de parcelas com suas chaves.
@@ -1563,6 +1584,46 @@ app.get('/api/admin/loads', auth, checkLicense, async (req, res) => {
     } catch (error) {
         console.error('Erro ao listar cargas:', error);
         res.status(500).json({ success: false, message: 'Erro ao listar cargas' });
+    }
+});
+
+// ===== ORGANIZAÇÃO: definir a regional de uma carga (UA) =====
+app.put('/api/admin/loads/:loadId/regional', auth, checkLicense, async (req, res) => {
+    try {
+        const { regional } = req.body;
+        const ua = await Load.findOne({ _id: req.params.loadId, companyId: req.user.companyId });
+        if (!ua) {
+            return res.status(404).json({ success: false, message: 'Carga não encontrada' });
+        }
+        ua.regional = (regional || '').trim().toUpperCase(); // padroniza em maiúsculo pra agrupar certo
+        await ua.save();
+        res.json({ success: true, loadId: ua._id, regional: ua.regional });
+    } catch (error) {
+        console.error('Erro ao definir regional:', error);
+        res.status(500).json({ success: false, message: 'Erro: ' + error.message });
+    }
+});
+
+// ===== ORGANIZAÇÃO: regionais já usadas para um contratante (pra sugerir no portal) =====
+app.get('/api/admin/regionais/:contratante', auth, checkLicense, async (req, res) => {
+    try {
+        const uas = await Load.find({
+            companyId: req.user.companyId,
+            type: 'parcelas',
+            regional: { $ne: '' }
+        });
+        const alvo = req.params.contratante.trim().toUpperCase();
+        const regionais = new Set();
+        uas.forEach(ua => {
+            const c = extrairClassificacao(ua.conteudo);
+            if ((c.contratante || '').trim().toUpperCase() === alvo && ua.regional) {
+                regionais.add(ua.regional);
+            }
+        });
+        res.json({ success: true, regionais: Array.from(regionais).sort() });
+    } catch (error) {
+        console.error('Erro ao listar regionais:', error);
+        res.status(500).json({ success: false, message: 'Erro: ' + error.message });
     }
 });
 
