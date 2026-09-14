@@ -99,7 +99,7 @@ const OrdemServico = mongoose.model('OrdemServico', osSchema);
 // Monta a chave única de uma parcela. ESTE formato tem que ser IGUAL no app depois:
 // PROJETO|FAZENDA|TALHAO|NUMERO — sem espaço nas pontas, tudo MAIÚSCULO, espaços internos colapsados.
 function montarChaveParcela(projeto, fazenda, talhao, numero) {
-    const limpar = (s) => (s || '').toString().trim().toUpperCase().replace(/\s+/g, ' ');
+    const limpar = (s) => (s || '').toString().trim().replace(/\s+/g, ' ');
     return [limpar(projeto), limpar(fazenda), limpar(talhao), limpar(numero)].join('|');
 }
 
@@ -1326,10 +1326,15 @@ app.get('/api/app/os/status/:loadId', auth, checkLicense, async (req, res) => {
             return res.json({ success: true, existeOS: false, statuses: [] });
         }
         // Só devolve as parcelas que já têm situação (feita/recusada). As pendentes ficam de fora.
+        // Remonta a chave com a caixa ORIGINAL dos campos (o app grava assim), sem forçar maiúsculo.
+        const chaveOriginal = (p) => {
+            const limpar = (s) => (s || '').toString().trim().replace(/\s+/g, ' ');
+            return [limpar(p.projeto), limpar(p.fazenda), limpar(p.talhao), limpar(p.numero)].join('|');
+        };
         const statuses = os.parcelas
             .filter(p => p.situacao === 'feita' || p.situacao === 'recusada')
             .map(p => ({
-                chave: p.chave,
+                chave: chaveOriginal(p),
                 situacao: p.situacao,
                 lider: p.lider || null,
                 dataHora: p.dataHora || null,
