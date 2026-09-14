@@ -1534,6 +1534,83 @@ app.get('/api/admin/os', auth, checkLicense, async (req, res) => {
     }
 });
 
+// ===== DASHBOARD: resumo gerencial do portal =====
+app.get('/api/admin/dashboard-resumo', auth, checkLicense, async (req, res) => {
+    try {
+        // O.S. ativas. O.S. antigas sem campo "estado" também contam como ativas.
+        const ordensAtivas = await OrdemServico.find({
+            companyId: req.user.companyId,
+            $or: [
+                { estado: 'ativa' },
+                { estado: { $exists: false } },
+                { estado: null }
+            ]
+        });
+
+        let parcelasPendentes = 0;
+        const equipesHoje = new Set();
+
+        // Data de hoje no horário de São Paulo.
+        const hoje = new Intl.DateTimeFormat('pt-BR', {
+            timeZone: 'America/Sao_Paulo'
+        }).format(new Date());
+
+        for (const os of ordensAtivas) {
+            for (const p of os.parcelas) {
+                const situacao = p.situacao || 'pendente';
+
+                // Mantém a mesma regra usada na tela da O.S.:
+                // tudo que não é feita, sincronizada ou recusada é pendente.
+                if (
+                    situacao !== 'feita' &&
+                    situacao !== 'sincronizada' &&
+                    situacao !== 'recusada'
+                ) {
+                    parcelasPendentes++;
+                }
+
+                // Equipe hoje = líder diferente com parcela executada hoje.
+                if (
+                    (situacao === 'feita' || situacao === 'sincronizada') &&
+                    p.lider &&
+                    p.dataHora &&
+                    p.dataHora.includes(hoje)
+                ) {
+                    equipesHoje.add(p.lider.trim());
+                }
+            }
+        }
+
+        // UA ativa sem parâmetro vinculado.
+        const cargasSemParametro = await Load.countDocuments({
+            companyId: req.user.companyId,
+            type: 'parcelas',
+            isActive: true,
+            $or: [
+                { parametroVinculado: null },
+                { parametroVinculado: { $exists: false } }
+            ]
+        });
+
+        res.json({
+            success: true,
+            resumo: {
+                osAtivas: ordensAtivas.length,
+                parcelasPendentes,
+                equipesHoje: equipesHoje.size,
+                cargasSemParametro
+            }
+        });
+
+    } catch (error) {
+        console.error('Erro ao gerar resumo do dashboard:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erro ao gerar resumo do dashboard: ' + error.message
+        });
+    }
+});
+
 // ===== FATIA 1 (teste): pré-visualizar as chaves de uma carga. NÃO grava nada. =====
 app.get('/api/admin/os/preview/:loadId', auth, checkLicense, async (req, res) => {
     try {
