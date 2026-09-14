@@ -504,6 +504,30 @@ function desenharMapa(pontos){
   setTimeout(()=>{ if(osMapa) osMapa.invalidateSize(); }, 200);
 }
 
+// ===== UNIFICAÇÃO: vincular parâmetro a um UA =====
+async function abrirVincular(uaId){
+  try{
+    const d = await (await fetch('/api/admin/loads',{headers:H()})).json();
+    const parametros = (d.loads||[]).filter(l => l.type === 'parametros');
+    if(!parametros.length){ alert('Nenhum parâmetro enviado ainda. Suba um parâmetro primeiro.'); return; }
+    // monta uma lista simples de escolha
+    let opcoes = parametros.map((p,i)=> (i+1) + ') ' + (p.description||p.originalName||p.version)).join('\n');
+    let escolha = prompt('Qual parâmetro vincular a este UA?\n\n' + opcoes + '\n\n(digite o número, ou 0 para desvincular)');
+    if(escolha === null) return;
+    escolha = parseInt(escolha);
+    let parametroId = null;
+    if(escolha > 0 && escolha <= parametros.length){
+      parametroId = parametros[escolha-1].id;
+    }
+    const r = await (await fetch('/api/admin/loads/'+uaId+'/vincular-parametro',{
+      method:'PUT', headers:{...H(),'Content-Type':'application/json'},
+      body: JSON.stringify({ parametroId })
+    })).json();
+    if(r.success){ loadCargas(); }
+    else alert(r.message||'Erro ao vincular');
+  }catch(e){ alert('Erro ao vincular parâmetro'); }
+}
+
 async function criarOS(loadId){
   if(!confirm('Criar uma Ordem de Serviço a partir desta carga?')) return;
   try{
@@ -533,7 +557,9 @@ async function loadCargas(){
           </div>
           <div style="white-space:nowrap;text-align:right">
             <span class="pill">${l.isActive?'ativa':'inativa'}</span>
+            ${l.type==='parcelas'?`<span class="pill" style="${l.parametroVinculado?'background:#e2efe4;color:var(--verde)':'background:#f2dede;color:var(--vermelho)'}">${l.parametroVinculado?'com parâmetro':'sem parâmetro'}</span>`:''}
             ${l.type==='parcelas'?`<button class="btn btn-sm" onclick="criarOS('${l.id}')">Criar O.S.</button>`:''}
+            ${l.type==='parcelas'?`<button class="btn btn-sm btn-ghost" onclick="abrirVincular('${l.id}')">Parâmetro</button>`:''}
             <button class="btn btn-sm btn-ghost" onclick="toggleLoad('${l.id}')">${l.isActive?'Desativar':'Ativar'}</button>
             <button class="btn btn-sm btn-perigo" onclick="deleteLoad('${l.id}')">Excluir</button>
           </div>
