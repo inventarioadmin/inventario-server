@@ -192,7 +192,10 @@
     <div class="secao">
       <h3 style="display:flex;justify-content:space-between;align-items:center">
         Exportações recebidas dos coletores
-        <button class="btn btn-sm btn-ghost" onclick="loadSyncHistory()">Atualizar</button>
+        <span style="display:flex;gap:8px">
+          <button class="btn btn-sm btn-ghost btn-perigo" onclick="limparDownloads()">Limpar downloads</button>
+          <button class="btn btn-sm btn-ghost" onclick="loadSyncHistory()">Atualizar</button>
+        </span>
       </h3>
       <div style="overflow-x:auto">
         <table>
@@ -648,12 +651,35 @@ async function loadSyncHistory(){
           <td><span class="selo ${it.type==='upload'?'up':'down'}">${it.type==='upload'?'Enviado':'Baixado'}</span></td>
           <td>${it.filename||''}</td>
           <td>${formatSize(it.fileSize)}</td>
-          <td>${it.type==='upload'?`<button class="btn btn-sm btn-ghost" onclick="downloadSync('${it.id}')">Baixar</button>`:'—'}</td>
+          <td style="white-space:nowrap">
+            ${it.type==='upload'?`<button class="btn btn-sm btn-ghost" onclick="downloadSync('${it.id}')">Baixar</button>`:''}
+            <button class="btn btn-sm btn-perigo" onclick="excluirSync('${it.id}')">Excluir</button>
+          </td>
         </tr>`).join('');
     }else{
       tb.innerHTML = '<tr><td colspan="6" class="vazio">Nenhuma exportação recebida ainda.</td></tr>';
     }
   }catch(e){ console.error(e); }
+}
+
+async function excluirSync(id){
+  if(!confirm('Excluir este registro? (o arquivo, se houver, some do servidor — o backup fica no celular)')) return;
+  try{
+    const r = await fetch('/api/admin/sync/history/'+id, {method:'DELETE', headers:H()});
+    const d = await r.json();
+    if(d.success){ loadSyncHistory(); }
+    else alert(d.message||'Erro ao excluir');
+  }catch(e){ alert('Erro ao excluir'); }
+}
+
+async function limparDownloads(){
+  if(!confirm('Apagar TODOS os registros de "Baixado"? Os arquivos "Enviado" permanecem.')) return;
+  try{
+    const r = await fetch('/api/admin/sync/history-downloads', {method:'DELETE', headers:H()});
+    const d = await r.json();
+    if(d.success){ alert(d.apagados + ' registro(s) de download apagado(s).'); loadSyncHistory(); }
+    else alert(d.message||'Erro ao limpar');
+  }catch(e){ alert('Erro ao limpar'); }
 }
 
 async function downloadSync(id){
