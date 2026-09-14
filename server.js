@@ -1034,7 +1034,7 @@ app.get('/api/mobile/sync/loads', mobileAuth, checkLicense, async (req, res) => 
 });
 
 // ===== UNIFICAÇÃO: listar cargas de parcelas pro app, com status de parâmetro =====
-app.get('/api/mobile/sync/cargas-unificadas', mobileAuth, checkLicense, async (req, res) => {
+app.get('/api/app/sync/cargas-unificadas', auth, checkLicense, async (req, res) => {
     try {
         const uas = await Load.find({
             companyId: req.user.companyId,
@@ -1059,7 +1059,7 @@ app.get('/api/mobile/sync/cargas-unificadas', mobileAuth, checkLicense, async (r
 });
 
 // ===== UNIFICAÇÃO: baixar UA + parâmetro casados, num pacote só (lê do Mongo) =====
-app.get('/api/mobile/sync/carga-unificada/:loadId', mobileAuth, checkLicense, async (req, res) => {
+app.get('/api/app/sync/carga-unificada/:loadId', auth, checkLicense, async (req, res) => {
     try {
         const ua = await Load.findOne({
             _id: req.params.loadId,
