@@ -656,8 +656,7 @@ async function abrirOS(id){
         <h3 style="margin-bottom:12px">Mapa das parcelas</h3>
         <div id="osMapaBox" style="height:460px;border-radius:8px;overflow:hidden"></div>
         <div style="margin-top:10px;font-size:13px;color:var(--tinta-3)">
-          <span style="color:var(--verde)">●</span> Feita nesta equipe &nbsp;
-          <span style="color:var(--azul)">●</span> Feita por outra equipe &nbsp;
+          <span style="color:var(--verde)">●</span> Feita &nbsp;
           <span style="color:var(--vermelho)">●</span> Pendente &nbsp;
           <span style="color:var(--amarelo)">●</span> Recusada
         </div>
@@ -676,7 +675,7 @@ async function abrirOS(id){
 
 function corDoStatus(situacao){
   if(situacao==='feita') return '#2e7d46';        // verde
-  if(situacao==='sincronizada') return '#2563a8'; // azul
+  if(situacao==='sincronizada') return '#2e7d46'; // feita = verde
   if(situacao==='recusada') return '#c99a2e';     // amarelo
   return '#b0413a';                               // vermelho (pendente)
 }
@@ -689,9 +688,17 @@ function desenharMapa(pontos){
   if(!pontos.length){ el.innerHTML = '<p class="vazio">Nenhuma parcela com coordenada nesta O.S.</p>'; return; }
 
   osMapa = L.map('osMapaBox');
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19, attribution: '© OpenStreetMap'
-  }).addTo(osMapa);
+  const camadas = {
+    'Ruas (OpenStreetMap)': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      { maxZoom: 19, attribution: '© OpenStreetMap' }),
+    'Satélite Esri': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      { maxZoom: 19, attribution: 'Imagem © Esri, Maxar, Earthstar Geographics' })
+  };
+  let camadaSalva = 'Satélite Esri';
+  try { camadaSalva = localStorage.getItem('osCamada') || camadaSalva; } catch(e){}
+  (camadas[camadaSalva] || camadas['Satélite Esri']).addTo(osMapa);
+  L.control.layers(camadas, null, { position: 'topright' }).addTo(osMapa);
+  osMapa.on('baselayerchange', ev => { try { localStorage.setItem('osCamada', ev.name); } catch(e){} });
 
   const grupo = [];
   pontos.forEach(p=>{
@@ -701,8 +708,7 @@ function desenharMapa(pontos){
     }).addTo(osMapa);
     m.bindPopup('<b>'+(p.numero||p.chave)+'</b><br>'+
       (p.situacao==='pendente'?'Pendente':
-       p.situacao==='feita'?'Feita':
-       p.situacao==='sincronizada'?'Feita por outra equipe':'Recusada')+
+       (p.situacao==='feita'||p.situacao==='sincronizada')?'Feita':'Recusada')+
       (p.lider?'<br>Líder: '+p.lider:''));
     grupo.push([p.lat, p.lng]);
   });
