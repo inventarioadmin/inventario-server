@@ -355,16 +355,13 @@
     <div class="secao">
       <h3 style="display:flex;justify-content:space-between;align-items:center">
         Exportações recebidas dos coletores
-        <span style="display:flex;gap:8px">
-          <button class="btn btn-sm btn-ghost btn-perigo" onclick="limparDownloads()">Limpar downloads</button>
-          <button class="btn btn-sm btn-ghost" onclick="loadSyncHistory()">Atualizar</button>
-        </span>
+        <button class="btn btn-sm btn-ghost" onclick="loadSyncHistory()">Atualizar</button>
       </h3>
       <div style="overflow-x:auto">
         <table>
           <thead><tr>
-            <th>Data/hora</th><th>Dispositivo</th><th>Tipo</th>
-            <th>Arquivo</th><th>Tamanho</th><th>Ações</th>
+            <th>Data/hora</th><th>Dispositivo</th><th>Arquivo</th>
+            <th>Tamanho</th><th>Situação</th><th>Ações</th>
           </tr></thead>
           <tbody id="syncHistoryList"><tr><td colspan="6" class="vazio">Carregando…</td></tr></tbody>
         </table>
@@ -901,25 +898,39 @@ document.getElementById('uploadForm').addEventListener('submit', async e=>{
 
 async function loadSyncHistory(){
   try{
-    const r = await fetch('/api/admin/sync/history',{headers:H()});
+    const r = await fetch('/api/admin/sync/history?tipo=upload',{headers:H()});
     const d = await r.json();
     const tb = document.getElementById('syncHistoryList');
-    if(d.success && d.history.length){
-      tb.innerHTML = d.history.map(it=>`
-        <tr>
+    if(!(d.success && d.history.length)){
+      tb.innerHTML = '<tr><td colspan="6" class="vazio">Nenhuma exportação recebida ainda.</td></tr>';
+      return;
+    }
+    const SEM = 'Carga não identificada';
+    const grupos = {};
+    d.history.forEach(it=>{ const g = it.carga || SEM; (grupos[g] = grupos[g] || []).push(it); });
+    const nomes = Object.keys(grupos).sort((a,b)=> (a===SEM) - (b===SEM)); // não identificadas por último
+    tb.innerHTML = nomes.map(g=>{
+      const itens = grupos[g];
+      const novos = itens.filter(i=>!i.baixadoEm).length;
+      return `
+        <tr><td colspan="6" style="background:var(--papel-2);font-weight:600;color:var(--mata)">
+          ${g} <span class="pill">${itens.length} arquivo(s)${novos?` · ${novos} novo(s)`:''}</span>
+        </td></tr>` +
+        itens.map(it=>`
+        <tr${it.baixadoEm?'':' style="font-weight:600"'}>
           <td>${new Date(it.timestamp).toLocaleString('pt-BR')}</td>
           <td style="font-family:ui-monospace,monospace;font-size:12px">${it.androidId}</td>
-          <td><span class="selo ${it.type==='upload'?'up':'down'}">${it.type==='upload'?'Enviado':'Baixado'}</span></td>
           <td>${it.filename||''}</td>
           <td>${formatSize(it.fileSize)}</td>
+          <td>${it.baixadoEm
+              ? `<span class="selo ok">Baixado ${new Date(it.baixadoEm).toLocaleDateString('pt-BR')}</span>`
+              : '<span class="selo up">Novo</span>'}</td>
           <td style="white-space:nowrap">
-            ${it.type==='upload'?`<button class="btn btn-sm btn-ghost" onclick="downloadSync('${it.id}')">Baixar</button>`:''}
+            <button class="btn btn-sm btn-ghost" onclick="downloadSync('${it.id}')">Baixar</button>
             <button class="btn btn-sm btn-perigo" onclick="excluirSync('${it.id}')">Excluir</button>
           </td>
         </tr>`).join('');
-    }else{
-      tb.innerHTML = '<tr><td colspan="6" class="vazio">Nenhuma exportação recebida ainda.</td></tr>';
-    }
+    }).join('');
   }catch(e){ console.error(e); }
 }
 
@@ -953,6 +964,7 @@ async function downloadSync(id){
     a.href = url;
     a.download = (r.headers.get('Content-Disposition')||'').split('filename=')[1]?.replace(/"/g,'') || 'exportacao.csv';
     document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    loadSyncHistory(); // marca como baixado na tela
   }catch(e){ alert('Erro ao baixar arquivo'); }
 }
 

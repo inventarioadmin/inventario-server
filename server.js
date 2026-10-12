@@ -44,7 +44,8 @@ const syncSchema = new mongoose.Schema({
     fileSize: { type: Number, required: true },
     timestamp: { type: Date, default: Date.now },
     status: { type: String, enum: ['pending', 'completed', 'error'], default: 'completed' },
-    conteudo: { type: String, default: '' } // NOVO: texto do CSV exportado pelo coletor
+    conteudo: { type: String, default: '' }, // NOVO: texto do CSV exportado pelo coletor
+    baixadoEm: { type: Date, default: null }  // NOVO: quando o escritório baixou este arquivo
 });
 
 const SyncLog = mongoose.model('SyncLog', syncSchema);
@@ -101,6 +102,25 @@ const OrdemServico = mongoose.model('OrdemServico', osSchema);
 function montarChaveParcela(projeto, fazenda, talhao, numero) {
     const limpar = (s) => (s || '').toString().trim().replace(/\s+/g, ' ');
     return [limpar(projeto), limpar(fazenda), limpar(talhao), limpar(numero)].join('|');
+}
+
+// ===== EXPORTAÇÕES: chaves (projeto|fazenda|talhao|numero) de qualquer CSV — carga ou exportação =====
+function chavesDoCsv(conteudoCsv) {
+    const set = new Set();
+    if (!conteudoCsv) return set;
+    const linhas = conteudoCsv.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim() !== '');
+    if (linhas.length < 2) return set;
+    const semAcento = (s) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    // "numero_parcela" (carga) e "Numero Parcela" (exportação) viram "numeroparcela"
+    const cab = linhas[0].split(';').map(h => semAcento(h.trim().toLowerCase()).replace(/[\s_]+/g, ''));
+    const iP = cab.indexOf('projeto'), iF = cab.indexOf('fazenda');
+    const iT = cab.indexOf('talhao'), iN = cab.indexOf('numeroparcela');
+    if ([iP, iF, iT, iN].some(i => i < 0)) return set;
+    for (let i = 1; i < linhas.length; i++) {
+        const c = linhas[i].split(';');
+        set.add(montarChaveParcela(c[iP], c[iF], c[iT], c[iN]).toUpperCase());
+    }
+    return set;
 }
 
 // ===== ORGANIZAÇÃO: extrai contratante e atividade(projeto) da 1ª linha de dados do UA =====
@@ -1814,9 +1834,21 @@ app.delete('/api/admin/sync/history-downloads', auth, checkLicense, async (req, 
 // 7. HISTÓRICO DE SINCRONIZAÇÕES
 app.get('/api/admin/sync/history', auth, checkLicense, async (req, res) => {
     try {
-        const history = await SyncLog.find({
-            companyId: req.user.companyId
-        }).sort({ timestamp: -1 }).limit(100);
+        const filtro = { companyId: req.user.companyId };
+        if (req.query.tipo === 'upload' || req.query.tipo === 'download') filtro.type = req.query.tipo;
+        const history = await SyncLog.find(filtro).sort({ timestamp: -1 }).limit(300);
+
+        // Descobre de qual carga veio cada exportação, comparando as parcelas
+        const uas = await Load.find({ companyId: req.user.companyId, type: 'parcelas' })
+            .select('description originalName conteudo');
+        const cargas = uas.map(ua => ({ nome: ua.description || ua.originalName, chaves: chavesDoCsv(ua.conteudo) }));
+        const acharCarga = (conteudo) => {
+            for (const ch of chavesDoCsv(conteudo)) {
+                const achou = cargas.find(c => c.chaves.has(ch));
+                if (achou) return achou.nome;
+            }
+            return '';
+        };
 
         res.json({
             success: true,
@@ -1827,10 +1859,11 @@ app.get('/api/admin/sync/history', auth, checkLicense, async (req, res) => {
                 filename: log.originalName,
                 fileSize: log.fileSize,
                 timestamp: log.timestamp,
-                status: log.status
+                status: log.status,
+                carga: log.type === 'upload' ? acharCarga(log.conteudo) : '',
+                baixadoEm: log.baixadoEm || null
             }))
         });
-
     } catch (error) {
         console.error('Erro ao buscar histórico:', error);
         res.status(500).json({ success: false, message: 'Erro ao buscar histórico' });
@@ -1895,6 +1928,9 @@ app.get('/api/admin/sync/download/:syncId', auth, checkLicense, async (req, res)
         if (!syncLog.conteudo) {
             return res.status(404).json({ success: false, message: 'Conteúdo da exportação não encontrado' });
         }
+
+                syncLog.baixadoEm = new Date();
+        await syncLog.save();
 
         res.setHeader('Content-Disposition', `attachment; filename="${syncLog.originalName}"`);
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
