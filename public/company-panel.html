@@ -241,7 +241,15 @@
   }
 
     .os-filtro.on{background:var(--mata);color:#fff}
-  .os-filtros{display:grid;grid-template-columns:repeat(4,1fr) auto;gap:8px;align-items:center;margin-bottom:10px}
+  .modal-fundo{display:none;position:fixed;inset:0;background:rgba(20,30,22,.45);z-index:2000;align-items:center;justify-content:center;padding:16px}
+  .modal-fundo.on{display:flex}
+  .modal{background:#fff;border-radius:12px;padding:22px 24px;width:100%;max-width:440px;box-shadow:0 10px 40px rgba(0,0,0,.2)}
+  .modal h3{font-size:17px;color:var(--mata);margin-bottom:6px}
+  .modal-sub{font-size:13px;color:var(--tinta-3);margin-bottom:14px}
+  .modal-acoes{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+  .barra{height:6px;background:var(--papel-2);border-radius:4px;overflow:hidden;margin-top:8px}
+  .barra > i{display:block;height:100%;background:var(--verde)}
+  .filtros-cargas{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
   .os-chk{display:flex;align-items:center;margin:0;white-space:nowrap;font-size:13px;color:var(--tinta)}
   .os-chk input{width:auto;margin:0 6px 0 0}
   .os-selecao{font-size:14px;margin:0 0 10px;padding:8px 12px;background:var(--papel);border-radius:7px}
@@ -391,6 +399,18 @@
       <div id="osList"><p class="vazio">Carregando…</p></div>
     </div>
     <div id="osDetalhe"></div>
+  </div>
+</div>
+
+<!-- Janela de escolha (Parâmetro / Regional) -->
+<div id="modalFundo" class="modal-fundo" onclick="if(event.target===this) fecharModal()">
+  <div class="modal">
+    <h3 id="modalTitulo"></h3>
+    <div id="modalCorpo"></div>
+    <div class="modal-acoes">
+      <button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button>
+      <button class="btn" id="modalSalvar">Salvar</button>
+    </div>
   </div>
 </div>
 
@@ -553,18 +573,26 @@ async function loadOrdens(){
     const box = document.getElementById('osList');
     if(d.success && d.ordens && d.ordens.length){
       box.innerHTML = d.ordens.map(os=>{
-        // botões de mudar estado conforme o estado atual
         let acoes = `<button class="btn btn-sm" onclick="abrirOS('${os.id}')">Abrir</button>`;
         if(os.estado === 'ativa'){
           acoes += ` <button class="btn btn-sm btn-ghost" onclick="mudarEstadoOS('${os.id}','concluida')">Concluir</button>`;
         }else{
           acoes += ` <button class="btn btn-sm btn-ghost" onclick="mudarEstadoOS('${os.id}','ativa')">Reativar</button>`;
         }
+        const total = os.totalParcelas || 0;
+        const pct = total ? Math.round(100 * (os.feitas || 0) / total) : 0;
+        const ult = os.ultimaAtividade ? os.ultimaAtividade.split('-').reverse().join('/') : null;
         return `
         <div class="carga">
           <div>
-            <div class="tit">${os.nome||''}</div>
-            <small>${os.totalParcelas} parcela(s) · criada em ${new Date(os.criadaEm).toLocaleDateString('pt-BR')}</small>
+            <div class="tit">${esc(os.nome||'')}</div>
+            <small>
+              <b>${os.feitas||0}/${total}</b> feitas (${pct}%)
+              ${os.recusadas ? ` · ${os.recusadas} recusada(s)` : ''}
+              · ${ult ? 'última medição ' + ult : 'sem medições ainda'}
+              · criada em ${new Date(os.criadaEm).toLocaleDateString('pt-BR')}
+            </small>
+            <div class="barra"><i style="width:${pct}%"></i></div>
           </div>
           <div style="white-space:nowrap;text-align:right">${acoes}</div>
         </div>`;
@@ -837,63 +865,102 @@ async function tornarPendente(arg){
   }catch(e){ alert('Erro ao tornar pendente'); }
 }
 
-// ===== ORGANIZAÇÃO: definir a regional de um UA =====
-async function definirRegional(uaId, contratante){
+// ===== JANELA DE ESCOLHA =====
+function abrirModal(titulo, corpoHtml, aoSalvar){
+  document.getElementById('modalTitulo').textContent = titulo;
+  document.getElementById('modalCorpo').innerHTML = corpoHtml;
+  document.getElementById('modalSalvar').onclick = aoSalvar;
+  document.getElementById('modalFundo').classList.add('on');
+}
+function fecharModal(){ document.getElementById('modalFundo').classList.remove('on'); }
+
+// ===== CARGAS =====
+let cargasCache = [];
+let filtroCargas = { contratante:'', regional:'', atividade:'' };
+
+async function loadCargas(){
   try{
-    // busca as regionais já usadas para este contratante
-    let jaUsadas = [];
-    if(contratante){
-      const rr = await (await fetch('/api/admin/regionais/'+encodeURIComponent(contratante),{headers:H()})).json();
-      if(rr.success) jaUsadas = rr.regionais || [];
-    }
-    let msg = 'Contratante: ' + (contratante||'(desconhecido)') + '\n\n';
-    if(jaUsadas.length){
-      msg += 'Regionais já usadas:\n' + jaUsadas.map((r,i)=>(i+1)+') '+r).join('\n') + '\n\n';
-      msg += 'Digite o número de uma da lista, OU escreva uma regional nova:';
-    }else{
-      msg += 'Nenhuma regional ainda para este contratante.\nEscreva a regional (ex: PR, SC):';
-    }
-    let resp = prompt(msg);
-    if(resp === null) return;
-    resp = resp.trim();
-    if(resp === '') return;
-    // se digitou um número que corresponde a uma da lista, usa ela
-    const n = parseInt(resp);
-    let regional = resp;
-    if(!isNaN(n) && n >= 1 && n <= jaUsadas.length && String(n) === resp){
-      regional = jaUsadas[n-1];
-    }
-    const r = await (await fetch('/api/admin/loads/'+uaId+'/regional',{
-      method:'PUT', headers:{...H(),'Content-Type':'application/json'},
-      body: JSON.stringify({ regional })
-    })).json();
-    if(r.success){ loadCargas(); }
-    else alert(r.message||'Erro ao definir regional');
-  }catch(e){ alert('Erro ao definir regional'); }
+    const r = await fetch('/api/admin/loads',{headers:H()});
+    const d = await r.json();
+    cargasCache = (d.success && d.loads) ? d.loads : [];
+    desenharCargas();
+  }catch(e){ document.getElementById('loadsList').innerHTML='<p class="vazio">Erro ao carregar cargas.</p>'; }
 }
 
-// ===== UNIFICAÇÃO: vincular parâmetro a um UA =====
-async function abrirVincular(uaId){
-  try{
-    const d = await (await fetch('/api/admin/loads',{headers:H()})).json();
-    const parametros = (d.loads||[]).filter(l => l.type === 'parametros');
-    if(!parametros.length){ alert('Nenhum parâmetro enviado ainda. Suba um parâmetro primeiro.'); return; }
-    // monta uma lista simples de escolha
-    let opcoes = parametros.map((p,i)=> (i+1) + ') ' + (p.description||p.originalName||p.version)).join('\n');
-    let escolha = prompt('Qual parâmetro vincular a este UA?\n\n' + opcoes + '\n\n(digite o número, ou 0 para desvincular)');
-    if(escolha === null) return;
-    escolha = parseInt(escolha);
-    let parametroId = null;
-    if(escolha > 0 && escolha <= parametros.length){
-      parametroId = parametros[escolha-1].id;
-    }
-    const r = await (await fetch('/api/admin/loads/'+uaId+'/vincular-parametro',{
-      method:'PUT', headers:{...H(),'Content-Type':'application/json'},
-      body: JSON.stringify({ parametroId })
-    })).json();
-    if(r.success){ loadCargas(); }
-    else alert(r.message||'Erro ao vincular');
-  }catch(e){ alert('Erro ao vincular parâmetro'); }
+function trocarFiltroCargas(campo, valor){
+  filtroCargas[campo] = valor;
+  if(campo === 'contratante'){ filtroCargas.regional = ''; filtroCargas.atividade = ''; }
+  if(campo === 'regional'){ filtroCargas.atividade = ''; }
+  desenharCargas();
+}
+
+function desenharCargas(){
+  const box = document.getElementById('loadsList');
+  if(!cargasCache.length){
+    box.innerHTML = '<p class="vazio">Nenhuma carga enviada ainda. Use o formulário ao lado.</p>';
+    return;
+  }
+  const f = filtroCargas;
+  const todasUA = cargasCache.filter(l => l.type === 'parcelas');
+  const parametros = cargasCache.filter(l => l.type === 'parametros');
+  const okC = l => !f.contratante || l.contratante === f.contratante;
+  const okR = l => !f.regional || l.regional === f.regional;
+  const okA = l => !f.atividade || l.atividade === f.atividade;
+  const sel = (lista, atual, rotulo) => `<option value="">${rotulo}</option>` +
+    lista.map(v => `<option value="${esc(v)}" ${v === atual ? 'selected' : ''}>${esc(v)}</option>`).join('');
+
+  const filtros = `
+    <div class="filtros-cargas">
+      <select onchange="trocarFiltroCargas('contratante', this.value)">${sel(unicos(todasUA.map(l => l.contratante)), f.contratante, 'Contratante')}</select>
+      <select onchange="trocarFiltroCargas('regional', this.value)">${sel(unicos(todasUA.filter(okC).map(l => l.regional)), f.regional, 'Regional')}</select>
+      <select onchange="trocarFiltroCargas('atividade', this.value)">${sel(unicos(todasUA.filter(l => okC(l) && okR(l)).map(l => l.atividade)), f.atividade, 'Atividade')}</select>
+    </div>`;
+
+  const uas = todasUA.filter(l => okC(l) && okR(l) && okA(l));
+
+  const renderCarga = l => `
+    <div class="carga">
+      <div>
+        <div class="tit">${l.type==='parcelas'?'Parcelas':'Parâmetros'} — ${esc(l.description||l.originalName||'')}</div>
+        <small>${esc(l.version||'')} · ${new Date(l.uploadDate).toLocaleDateString('pt-BR')}</small>
+      </div>
+      <div class="carga-status">
+        <span class="pill">${l.isActive?'ativa':'inativa'}</span>
+        ${l.type==='parcelas' ? `
+          <span class="pill" style="${l.parametroVinculado?'background:#e2efe4;color:var(--verde)':'background:#f2dede;color:var(--vermelho)'}">
+            ${l.parametroVinculado?'com parâmetro':'sem parâmetro'}</span>
+          <span class="pill">${l.regional ? 'regional: ' + esc(l.regional) : 'sem regional'}</span>
+          ${l.atividade ? `<span class="pill">${esc(l.contratante)} · ${esc(l.atividade)}</span>` : ''}
+        ` : ''}
+      </div>
+      <div class="carga-acoes">
+        ${l.type==='parcelas' ? (l.os
+          ? `<button class="btn btn-sm" onclick="irParaOS('${l.os.id}','${l.os.estado}')">Abrir O.S.</button>`
+          : `<button class="btn btn-sm" onclick="criarOS('${l.id}')">Criar O.S.</button>`) : ''}
+        ${l.type==='parcelas' ? `<button class="btn btn-sm btn-ghost" onclick="abrirVincular('${l.id}')">Parâmetro</button>` : ''}
+        ${l.type==='parcelas' ? `<button class="btn btn-sm btn-ghost" onclick="definirRegional('${l.id}')">Regional</button>` : ''}
+        <button class="btn btn-sm btn-ghost" onclick="toggleLoad('${l.id}')">${l.isActive?'Desativar':'Ativar'}</button>
+        <button class="btn btn-sm btn-perigo" onclick="deleteLoad('${l.id}')">Excluir</button>
+      </div>
+    </div>`;
+
+  const bloco = (titulo, lista, vazio) => `
+    <div class="grupo-cargas">
+      <div class="grupo-cargas-titulo">${titulo}<span>${lista.length}</span></div>
+      ${lista.length ? lista.map(renderCarga).join('') : `<p class="vazio">${vazio}</p>`}
+    </div>`;
+
+  box.innerHTML = filtros +
+    bloco('Unidades de Amostra — UA', uas, 'Nenhuma UA neste filtro.') +
+    bloco('Parâmetros — PRMT', parametros, 'Nenhum parâmetro disponível.');
+}
+
+// Vai da carga direto para a O.S. dela
+function irParaOS(id, estado){
+  document.querySelector('.aba[data-alvo="pOS"]').click();
+  trocarEstadoOS(estado || 'ativa');
+  abrirOS(id);
+  setTimeout(() => document.getElementById('osDetalhe').scrollIntoView({behavior:'smooth'}), 400);
 }
 
 async function criarOS(loadId){
@@ -908,84 +975,80 @@ async function criarOS(loadId){
     }else{
       alert(d.message||'Erro ao criar O.S.');
     }
+    loadCargas(); // troca o botão para "Abrir O.S."
   }catch(e){ alert('Erro ao criar O.S.'); }
 }
 
-async function loadCargas(){
-  try{
-    const r = await fetch('/api/admin/loads',{headers:H()});
-    const d = await r.json();
-    const box = document.getElementById('loadsList');
+// ===== REGIONAL: lista das já usadas + "Nova regional…" =====
+async function definirRegional(uaId){
+  const ua = cargasCache.find(l => l.id === uaId) || {};
+  const contratante = ua.contratante || '';
+  let jaUsadas = [];
+  if(contratante){
+    try{
+      const rr = await (await fetch('/api/admin/regionais/'+encodeURIComponent(contratante),{headers:H()})).json();
+      if(rr.success) jaUsadas = rr.regionais || [];
+    }catch(e){}
+  }
+  const atual = ua.regional || '';
+  abrirModal('Regional', `
+    <div class="modal-sub">${esc(ua.description||ua.originalName||'')}<br>Contratante: <b>${esc(contratante||'(não identificado)')}</b></div>
+    ${jaUsadas.length ? `
+      <div class="campo"><label>Regional</label>
+        <select id="mRegSel" onchange="document.getElementById('mRegNovaBox').style.display = this.value==='__nova' ? 'block' : 'none'">
+          ${atual ? '' : '<option value="">Selecione…</option>'}
+          ${jaUsadas.map(r => `<option value="${esc(r)}" ${r===atual?'selected':''}>${esc(r)}</option>`).join('')}
+          <option value="__nova">+ Nova regional…</option>
+        </select></div>` : ''}
+    <div class="campo" id="mRegNovaBox" style="display:${jaUsadas.length ? 'none' : 'block'}">
+      <label>Nova regional</label><input id="mRegNova" placeholder="ex: PR, SC">
+    </div>`,
+    async () => {
+      const s = document.getElementById('mRegSel');
+      const regional = (s && s.value !== '__nova') ? s.value : document.getElementById('mRegNova').value.trim();
+      if(!regional) return alert('Escolha ou digite a regional.');
+      try{
+        const r = await (await fetch('/api/admin/loads/'+uaId+'/regional',{
+          method:'PUT', headers:{...H(),'Content-Type':'application/json'},
+          body: JSON.stringify({ regional })
+        })).json();
+        if(r.success){ fecharModal(); loadCargas(); }
+        else alert(r.message||'Erro ao definir regional');
+      }catch(e){ alert('Erro ao definir regional'); }
+    });
+}
 
-    if(d.success && d.loads.length){
-
-      const uas = d.loads.filter(l => l.type === 'parcelas');
-      const parametros = d.loads.filter(l => l.type === 'parametros');
-
-      const renderCarga = l => `
-        <div class="carga">
-
-          <div>
-            <div class="tit">${l.type==='parcelas'?'Parcelas':'Parâmetros'} — ${l.description||l.originalName||''}</div>
-            <small>${l.version||''} · ${new Date(l.uploadDate).toLocaleDateString('pt-BR')}</small>
-          </div>
-
-          <div class="carga-status">
-            <span class="pill">${l.isActive?'ativa':'inativa'}</span>
-
-            ${l.type==='parcelas'?`
-              <span class="pill" style="${l.parametroVinculado?'background:#e2efe4;color:var(--verde)':'background:#f2dede;color:var(--vermelho)'}">
-                ${l.parametroVinculado?'com parâmetro':'sem parâmetro'}
-              </span>
-            `:''}
-
-            ${l.type==='parcelas'?`
-              <span class="pill" style="background:var(--papel-2);color:var(--tinta-3)">
-                ${l.regional?('regional: '+l.regional):'sem regional'}
-              </span>
-            `:''}
-          </div>
-
-          <div class="carga-acoes">
-            ${l.type==='parcelas'?`<button class="btn btn-sm" onclick="criarOS('${l.id}')">Criar O.S.</button>`:''}
-            ${l.type==='parcelas'?`<button class="btn btn-sm btn-ghost" onclick="abrirVincular('${l.id}')">Parâmetro</button>`:''}
-            ${l.type==='parcelas'?`<button class="btn btn-sm btn-ghost" onclick="definirRegional('${l.id}','${(l.contratante||'').replace(/'/g,'')}')">Regional</button>`:''}
-
-            <button class="btn btn-sm btn-ghost" onclick="toggleLoad('${l.id}')">${l.isActive?'Desativar':'Ativar'}</button>
-            <button class="btn btn-sm btn-perigo" onclick="deleteLoad('${l.id}')">Excluir</button>
-          </div>
-
-        </div>`;
-
-        const blocoUA = `
-          <div class="grupo-cargas">
-            <div class="grupo-cargas-titulo">
-              Unidades de Amostra — UA
-              <span>${uas.length}</span>
-            </div>
-            ${uas.length
-              ? uas.map(renderCarga).join('')
-              : '<p class="vazio">Nenhuma UA disponível.</p>'}
-          </div>
-        `;
-
-        const blocoParametros = `
-          <div class="grupo-cargas">
-            <div class="grupo-cargas-titulo">
-              Parâmetros — PRMT
-              <span>${parametros.length}</span>
-            </div>
-            ${parametros.length
-              ? parametros.map(renderCarga).join('')
-              : '<p class="vazio">Nenhum parâmetro disponível.</p>'}
-          </div>
-        `;
-
-        box.innerHTML = blocoUA + blocoParametros;
-    }else{
-      box.innerHTML = '<p class="vazio">Nenhuma carga enviada ainda. Use o formulário ao lado.</p>';
-    }
-  }catch(e){ document.getElementById('loadsList').innerHTML='<p class="vazio">Erro ao carregar cargas.</p>'; }
+// ===== PARÂMETRO: lista com os mais prováveis primeiro =====
+function abrirVincular(uaId){
+  const ua = cargasCache.find(l => l.id === uaId) || {};
+  const parametros = cargasCache.filter(l => l.type === 'parametros');
+  if(!parametros.length) return alert('Nenhum parâmetro enviado ainda. Suba um parâmetro primeiro.');
+  const norm = s => String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase();
+  const nomeP = p => p.description || p.originalName || p.version || '';
+  // pontua quem tem a mesma atividade e o mesmo contratante no nome
+  const casa = p => { const n = norm(nomeP(p));
+    return (ua.atividade && n.includes(norm(ua.atividade)) ? 1 : 0) + (ua.contratante && n.includes(norm(ua.contratante)) ? 1 : 0); };
+  const ord = [...parametros].sort((a,b) => casa(b) - casa(a) || nomeP(a).localeCompare(nomeP(b)));
+  const atual = ua.parametroVinculado ? String(ua.parametroVinculado) : '';
+  abrirModal('Parâmetro da carga', `
+    <div class="modal-sub">${esc(ua.description||ua.originalName||'')}</div>
+    <div class="campo"><label>Parâmetro</label>
+      <select id="mPar">
+        <option value="">— Sem parâmetro —</option>
+        ${ord.map(p => `<option value="${p.id}" ${String(p.id)===atual?'selected':''}>${casa(p)===2?'★ ':''}${esc(nomeP(p))}</option>`).join('')}
+      </select></div>
+    <div class="modal-sub" style="margin:0">★ = mesma atividade e contratante da carga</div>`,
+    async () => {
+      const parametroId = document.getElementById('mPar').value || null;
+      try{
+        const r = await (await fetch('/api/admin/loads/'+uaId+'/vincular-parametro',{
+          method:'PUT', headers:{...H(),'Content-Type':'application/json'},
+          body: JSON.stringify({ parametroId })
+        })).json();
+        if(r.success){ fecharModal(); loadCargas(); }
+        else alert(r.message||'Erro ao vincular');
+      }catch(e){ alert('Erro ao vincular parâmetro'); }
+    });
 }
 
 async function toggleLoad(id){

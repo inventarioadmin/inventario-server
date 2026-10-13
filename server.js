@@ -1584,13 +1584,28 @@ app.get('/api/admin/os', auth, checkLicense, async (req, res) => {
         res.json({
             success: true,
             total: lista.length,
-            ordens: lista.map(os => ({
-                id: os._id,
-                nome: os.nome,
-                criadaEm: os.criadaEm,
-                estado: os.estado || 'ativa', // O.S. antigas sem estado contam como ativa
-                totalParcelas: os.totalParcelas
-            }))
+            ordens: lista.map(os => {
+                let feitas = 0, recusadas = 0, ultima = '';
+                os.parcelas.forEach(p => {
+                    if (p.situacao === 'feita' || p.situacao === 'sincronizada') feitas++;
+                    else if (p.situacao === 'recusada') recusadas++;
+                    const m = String(p.dataHora || '').match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+                    if (m) {
+                        const iso = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+                        if (iso > ultima) ultima = iso; // data da medição mais recente
+                    }
+                });
+                return {
+                    id: os._id,
+                    nome: os.nome,
+                    criadaEm: os.criadaEm,
+                    estado: os.estado || 'ativa', // O.S. antigas sem estado contam como ativa
+                    totalParcelas: os.totalParcelas,
+                    feitas,
+                    recusadas,
+                    ultimaAtividade: ultima || null
+                };
+            })
         });
     } catch (error) {
         console.error('Erro ao listar O.S.:', error);
@@ -1712,22 +1727,32 @@ app.get('/api/admin/loads', auth, checkLicense, async (req, res) => {
             companyId: req.user.companyId
         }).sort({ uploadDate: -1 });
 
+        // Qual O.S. pertence a cada carga (pra mostrar "Abrir O.S." no lugar de "Criar O.S.")
+        const ordens = await OrdemServico.find({ companyId: req.user.companyId }).select('loadId estado');
+        const osPorCarga = {};
+        ordens.forEach(o => { osPorCarga[String(o.loadId)] = { id: o._id, estado: o.estado || 'ativa' }; });
+
         res.json({
             success: true,
-            loads: loads.map(load => ({
-                id: load._id,
-                type: load.type,
-                description: load.description,
-                version: load.version,
-                originalName: load.originalName,
-                uploadDate: load.uploadDate,
-                uploadedBy: load.uploadedBy,
-                isActive: load.isActive,
-                fileSize: load.fileSize,
-                parametroVinculado: load.parametroVinculado || null,
-                regional: load.regional || '',
-                contratante: load.type === 'parcelas' ? (extrairClassificacao(load.conteudo).contratante || '') : ''
-            }))
+            loads: loads.map(load => {
+                const clas = load.type === 'parcelas' ? extrairClassificacao(load.conteudo) : { contratante: '', atividade: '' };
+                return {
+                    id: load._id,
+                    type: load.type,
+                    description: load.description,
+                    version: load.version,
+                    originalName: load.originalName,
+                    uploadDate: load.uploadDate,
+                    uploadedBy: load.uploadedBy,
+                    isActive: load.isActive,
+                    fileSize: load.fileSize,
+                    parametroVinculado: load.parametroVinculado || null,
+                    regional: load.regional || '',
+                    contratante: clas.contratante || '',
+                    atividade: clas.atividade || '',
+                    os: osPorCarga[String(load._id)] || null
+                };
+            })
         });
 
     } catch (error) {
