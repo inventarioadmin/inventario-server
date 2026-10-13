@@ -89,7 +89,8 @@ const osSchema = new mongoose.Schema({
         situacao: String,
         lider: String,
         dataHora: String,
-        motivo: String
+        motivo: String,
+        reabertaEm: Date // NOVO: quando o escritório tornou a parcela pendente de novo
     }]
 });
 
@@ -1415,15 +1416,29 @@ app.post('/api/app/os/status', auth, checkLicense, async (req, res) => {
             await os.save();
         }
 
-        // Índice das parcelas da O.S. por chave, pra casar rápido.
+        // Índice das parcelas da O.S. por chave (sem diferenciar maiúscula/minúscula)
         const porChave = {};
-        os.parcelas.forEach((p, i) => { porChave[p.chave] = i; });
+        os.parcelas.forEach((p, i) => { porChave[(p.chave || '').toUpperCase()] = i; });
+
+        // dd/MM/yyyy -> yyyy-MM-dd (pra comparar datas como texto)
+        const paraISO = (s) => {
+            const m = String(s || '').match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+            return m ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : '';
+        };
 
         let pintadas = 0, ignoradas = 0;
         for (const st of statuses) {
-            const idx = porChave[st.chave];
+            const idx = porChave[(st.chave || '').toUpperCase()];
             if (idx === undefined) { ignoradas++; continue; } // chave não existe nesta O.S.
             const p = os.parcelas[idx];
+            // Parcela reaberta pelo escritório: ignora reenvio de medição ANTERIOR à reabertura
+            if (p.reabertaEm) {
+                const diaReabertura = new Date(p.reabertaEm)
+                    .toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }); // yyyy-MM-dd
+                const diaMedicao = paraISO(st.dataHora);
+                if (diaMedicao && diaMedicao < diaReabertura) { ignoradas++; continue; }
+                p.reabertaEm = undefined; // medição nova: aceita e limpa a marca
+            }
             // situação válida: feita ou recusada (o app manda uma dessas)
             p.situacao = (st.situacao === 'recusada') ? 'recusada' : 'feita';
             p.lider = st.lider || null;
@@ -1488,6 +1503,28 @@ app.get('/api/admin/os/:osId/planilha', auth, checkLicense, async (req, res) => 
         res.send('\uFEFF' + csv); // BOM pra o Excel abrir com acento certo
     } catch (error) {
         console.error('Erro ao gerar planilha da O.S.:', error);
+        res.status(500).json({ success: false, message: 'Erro: ' + error.message });
+    }
+});
+
+// ===== Tornar uma parcela PENDENTE de novo (correção pelo escritório) =====
+app.put('/api/admin/os/:osId/parcela/pendente', auth, checkLicense, async (req, res) => {
+    try {
+        const alvo = (req.body.chave || '').toUpperCase();
+        const os = await OrdemServico.findOne({ _id: req.params.osId, companyId: req.user.companyId });
+        if (!os) return res.status(404).json({ success: false, message: 'O.S. não encontrada' });
+        const p = os.parcelas.find(x => (x.chave || '').toUpperCase() === alvo);
+        if (!p) return res.status(404).json({ success: false, message: 'Parcela não encontrada nesta O.S.' });
+        p.situacao = 'pendente';
+        p.lider = null;
+        p.dataHora = null;
+        p.motivo = '';
+        p.reabertaEm = new Date();
+        os.markModified('parcelas');
+        await os.save();
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Erro ao tornar parcela pendente:', error);
         res.status(500).json({ success: false, message: 'Erro: ' + error.message });
     }
 });

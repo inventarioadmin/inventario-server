@@ -598,6 +598,7 @@ async function mudarEstadoOS(id, estado){
 }
 
 let osMapa = null; // guarda a instância do mapa pra poder recriar ao trocar de O.S.
+let osAtualId = null; // O.S. aberta no momento
 
 async function abrirOS(id){
   const box = document.getElementById('osDetalhe');
@@ -607,6 +608,7 @@ async function abrirOS(id){
     const d = await r.json();
     if(!d.success){ box.innerHTML = '<div class="secao"><p class="vazio">'+(d.message||'Erro ao abrir O.S.')+'</p></div>'; return; }
     const os = d.os;
+    osAtualId = os.id;
     const t = os.totais;
 
     const cards = `
@@ -671,6 +673,21 @@ async function abrirOS(id){
   }
 }
 
+async function tornarPendente(chaveCodificada){
+  const chave = decodeURIComponent(chaveCodificada);
+  if(!confirm('Tornar esta parcela PENDENTE de novo?\n\n' + chave +
+    '\n\nAvise o líder que fez: ele precisa refazer a parcela no coletor.')) return;
+  try{
+    const r = await fetch('/api/admin/os/' + osAtualId + '/parcela/pendente', {
+      method:'PUT', headers:{...H(),'Content-Type':'application/json'},
+      body: JSON.stringify({ chave })
+    });
+    const d = await r.json();
+    if(d.success) abrirOS(osAtualId);
+    else alert(d.message || 'Erro ao tornar pendente');
+  }catch(e){ alert('Erro ao tornar pendente'); }
+}
+
 function corDoStatus(situacao){
   if(situacao==='feita') return '#2e7d46';        // verde
   if(situacao==='sincronizada') return '#2e7d46'; // feita = verde
@@ -707,7 +724,11 @@ function desenharMapa(pontos){
     m.bindPopup('<b>'+(p.numero||p.chave)+'</b><br>'+
       (p.situacao==='pendente'?'Pendente':
        (p.situacao==='feita'||p.situacao==='sincronizada')?'Feita':'Recusada')+
-      (p.lider?'<br>Líder: '+p.lider:''));
+      (p.lider?'<br>Líder: '+p.lider:'')+
+      (p.situacao!=='pendente'
+        ? '<br><button class="btn btn-sm btn-perigo" style="margin-top:8px" onclick="tornarPendente(\''
+          + encodeURIComponent(p.chave).replace(/'/g,'%27') + '\')">Tornar pendente</button>'
+        : ''));
     grupo.push([p.lat, p.lng]);
   });
 
