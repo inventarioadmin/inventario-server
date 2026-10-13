@@ -241,6 +241,12 @@
   }
 
     .os-filtro.on{background:var(--mata);color:#fff}
+  .os-filtros{display:grid;grid-template-columns:repeat(4,1fr) auto;gap:8px;align-items:center;margin-bottom:10px}
+  .os-chk{display:flex;align-items:center;margin:0;white-space:nowrap;font-size:13px;color:var(--tinta)}
+  .os-chk input{width:auto;margin:0 6px 0 0}
+  .os-selecao{font-size:14px;margin:0 0 10px;padding:8px 12px;background:var(--papel);border-radius:7px}
+  .selo.rec{background:#f7ecd3;color:#8a6a12}
+  @media(max-width:820px){.os-filtros{grid-template-columns:1fr 1fr}}
 </style>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -597,8 +603,27 @@ async function mudarEstadoOS(id, estado){
   }catch(e){ alert('Erro ao mudar estado'); }
 }
 
-let osMapa = null; // guarda a instância do mapa pra poder recriar ao trocar de O.S.
-let osAtualId = null; // O.S. aberta no momento
+// ===== ORDEM DE SERVIÇO ABERTA: mapa, filtros, contadores e lista =====
+let osMapa = null;            // instância do mapa
+let osAtualId = null;         // O.S. aberta no momento
+let osPontos = [];            // todas as parcelas da O.S. aberta
+let osCamadaPontos = null;    // camada dos marcadores
+let osMarcadorPorChave = {};  // chave -> marcador (botão "Ver" da lista)
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const sitDe = p => p.situacao === 'sincronizada' ? 'feita' : (p.situacao || 'pendente');
+const nomeSit = s => s === 'feita' ? 'Feita' : s === 'recusada' ? 'Recusada' : 'Pendente';
+const seloSit = s => s === 'feita' ? 'ok' : s === 'recusada' ? 'rec' : 'off';
+const chaveArg = p => encodeURIComponent(p.chave).replace(/'/g, '%27');
+const unicos = arr => [...new Set(arr.filter(Boolean))].sort((a,b) => a.localeCompare(b, 'pt-BR', {numeric:true}));
+const opcoes = (lista, rotulo) => `<option value="">${rotulo}</option>` +
+  lista.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+
+function corDoStatus(situacao){
+  if(situacao==='feita' || situacao==='sincronizada') return '#2e7d46'; // verde
+  if(situacao==='recusada') return '#c99a2e';                            // amarelo
+  return '#b0413a';                                                     // vermelho (pendente)
+}
 
 async function abrirOS(id){
   const box = document.getElementById('osDetalhe');
@@ -606,40 +631,20 @@ async function abrirOS(id){
   try{
     const r = await fetch('/api/admin/os/'+id,{headers:H()});
     const d = await r.json();
-    if(!d.success){ box.innerHTML = '<div class="secao"><p class="vazio">'+(d.message||'Erro ao abrir O.S.')+'</p></div>'; return; }
+    if(!d.success){ box.innerHTML = '<div class="secao"><p class="vazio">'+esc(d.message||'Erro ao abrir O.S.')+'</p></div>'; return; }
     const os = d.os;
     osAtualId = os.id;
-    const t = os.totais;
-
-    const cards = `
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px">
-        <div class="secao" style="text-align:center;margin:0">
-          <div style="font-size:28px;font-weight:600;color:var(--verde)">${t.feitas + t.sincronizadas}</div>
-          <small style="color:var(--tinta-3)">Feitas</small>
-        </div>
-        <div class="secao" style="text-align:center;margin:0">
-          <div style="font-size:28px;font-weight:600;color:var(--vermelho)">${t.pendentes}</div>
-          <small style="color:var(--tinta-3)">Pendentes</small>
-        </div>
-        <div class="secao" style="text-align:center;margin:0">
-          <div style="font-size:28px;font-weight:600;color:var(--amarelo)">${t.recusadas}</div>
-          <small style="color:var(--tinta-3)">Recusadas</small>
-        </div>
-        <div class="secao" style="text-align:center;margin:0">
-          <div style="font-size:28px;font-weight:600;color:var(--tinta)">${t.total}</div>
-          <small style="color:var(--tinta-3)">Total</small>
-        </div>
-      </div>`;
+    osPontos = os.pontos || [];
 
     let resumo;
     if(os.resumoPorLider && os.resumoPorLider.length){
-      resumo = os.resumoPorLider.map(l=>`
+      resumo = `<table><thead><tr><th>Equipe / Líder</th><th>Por dia</th><th style="text-align:right">Total</th></tr></thead><tbody>` +
+        os.resumoPorLider.map(l=>`
         <tr>
-          <td><b>${l.lider}</b></td>
-          <td>${l.dias.map(x=>x.dia+' — '+x.total).join('<br>')}</td>
+          <td><b>${esc(l.lider)}</b></td>
+          <td>${l.dias.map(x=>esc(x.dia)+' — '+x.total).join('<br>')}</td>
           <td style="text-align:right"><b>${l.total}</b></td>
-        </tr>`).join('');
-      resumo = `<table><thead><tr><th>Equipe / Líder</th><th>Por dia</th><th style="text-align:right">Total</th></tr></thead><tbody>${resumo}</tbody></table>`;
+        </tr>`).join('') + '</tbody></table>';
     }else{
       resumo = '<p class="vazio">Aguardando as equipes sincronizarem. Assim que o app enviar as parcelas feitas, o resumo por equipe aparece aqui.</p>';
     }
@@ -647,62 +652,66 @@ async function abrirOS(id){
     box.innerHTML = `
       <div class="secao">
         <h3 style="margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">
-          ${os.nome}
+          ${esc(os.nome)}
           <button class="btn btn-sm" onclick="baixarPlanilhaOS('${os.id}')">Baixar planilha</button>
         </h3>
         <small style="color:var(--tinta-3)">Criada em ${new Date(os.criadaEm).toLocaleDateString('pt-BR')}</small>
       </div>
+      <div style="font-size:12px;font-weight:600;color:var(--tinta-3);margin:0 0 6px 2px">TOTAL DA CARGA</div>
+      <div id="osCards"></div>
       <div class="secao">
-        <h3 style="margin-bottom:12px">Mapa das parcelas</h3>
+        <h3 style="margin-bottom:12px">Mapa e parcelas</h3>
+        <div class="os-filtros">
+          <select id="fSit" onchange="atualizarOS(false)">
+            <option value="">Todas as situações</option>
+            <option value="feita">Feitas</option>
+            <option value="pendente">Pendentes</option>
+            <option value="recusada">Recusadas</option>
+          </select>
+          <select id="fFaz" onchange="trocarFazendaOS()">${opcoes(unicos(osPontos.map(p=>p.fazenda)), 'Todas as fazendas')}</select>
+          <select id="fTal" onchange="atualizarOS(true)">${opcoes(unicos(osPontos.map(p=>p.talhao)), 'Todos os talhões')}</select>
+          <input id="fNum" placeholder="Buscar nº da parcela" oninput="atualizarOS(false)">
+          <label class="os-chk"><input type="checkbox" id="fArea" checked onchange="atualizarSelecaoOS()"> Só a área do mapa</label>
+        </div>
+        <div id="osSelecao" class="os-selecao"></div>
         <div id="osMapaBox" style="height:460px;border-radius:8px;overflow:hidden"></div>
         <div style="margin-top:10px;font-size:13px;color:var(--tinta-3)">
           <span style="color:var(--verde)">●</span> Feita &nbsp;
           <span style="color:var(--vermelho)">●</span> Pendente &nbsp;
           <span style="color:var(--amarelo)">●</span> Recusada
         </div>
+        <div id="osTabela" style="margin-top:16px;max-height:420px;overflow:auto"></div>
       </div>
-      ${cards}
       <div class="secao">
         <h3>Resumo por equipe</h3>
         ${resumo}
       </div>`;
 
-    desenharMapa(os.pontos || []);
+    desenharCardsOS();
+    criarMapaOS();
+    atualizarOS(true);
   }catch(e){
+    console.error(e);
     box.innerHTML = '<div class="secao"><p class="vazio">Erro ao abrir O.S.</p></div>';
   }
 }
 
-async function tornarPendente(chaveCodificada){
-  const chave = decodeURIComponent(chaveCodificada);
-  if(!confirm('Tornar esta parcela PENDENTE de novo?\n\n' + chave +
-    '\n\nAvise o líder que fez: ele precisa refazer a parcela no coletor.')) return;
-  try{
-    const r = await fetch('/api/admin/os/' + osAtualId + '/parcela/pendente', {
-      method:'PUT', headers:{...H(),'Content-Type':'application/json'},
-      body: JSON.stringify({ chave })
-    });
-    const d = await r.json();
-    if(d.success) abrirOS(osAtualId);
-    else alert(d.message || 'Erro ao tornar pendente');
-  }catch(e){ alert('Erro ao tornar pendente'); }
+// Cartões do total da carga (calculados das parcelas, pra atualizar na hora)
+function desenharCardsOS(){
+  const c = {feita:0, pendente:0, recusada:0};
+  osPontos.forEach(p => { const k = sitDe(p); c[k] = (c[k]||0) + 1; });
+  document.getElementById('osCards').innerHTML =
+    '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px">' +
+    [[c.feita,'Feitas','var(--verde)'], [c.pendente,'Pendentes','var(--vermelho)'],
+     [c.recusada,'Recusadas','var(--amarelo)'], [osPontos.length,'Total','var(--tinta)']]
+    .map(([n,l,cor]) => `<div class="secao" style="text-align:center;margin:0">
+        <div style="font-size:28px;font-weight:600;color:${cor}">${n}</div>
+        <small style="color:var(--tinta-3)">${l}</small></div>`).join('') + '</div>';
 }
 
-function corDoStatus(situacao){
-  if(situacao==='feita') return '#2e7d46';        // verde
-  if(situacao==='sincronizada') return '#2e7d46'; // feita = verde
-  if(situacao==='recusada') return '#c99a2e';     // amarelo
-  return '#b0413a';                               // vermelho (pendente)
-}
-
-function desenharMapa(pontos){
-  // Recria o mapa do zero a cada abertura (evita sobreposição ao trocar de O.S.)
+function criarMapaOS(){
   if(osMapa){ osMapa.remove(); osMapa = null; }
-  const el = document.getElementById('osMapaBox');
-  if(!el) return;
-  if(!pontos.length){ el.innerHTML = '<p class="vazio">Nenhuma parcela com coordenada nesta O.S.</p>'; return; }
-
-  osMapa = L.map('osMapaBox');
+  osMapa = L.map('osMapaBox').setView([-24.5, -50.5], 7);
   const camadas = {
     'Ruas (OpenStreetMap)': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
       { maxZoom: 19, attribution: '© OpenStreetMap' }),
@@ -714,29 +723,118 @@ function desenharMapa(pontos){
   (camadas[camadaSalva] || camadas['Satélite Esri']).addTo(osMapa);
   L.control.layers(camadas, null, { position: 'topright' }).addTo(osMapa);
   osMapa.on('baselayerchange', ev => { try { localStorage.setItem('osCamada', ev.name); } catch(e){} });
-
-  const grupo = [];
-  pontos.forEach(p=>{
-    const m = L.circleMarker([p.lat, p.lng], {
-      radius: 6, color: '#fff', weight: 1,
-      fillColor: corDoStatus(p.situacao), fillOpacity: 0.9
-    }).addTo(osMapa);
-    m.bindPopup('<b>'+(p.numero||p.chave)+'</b><br>'+
-      (p.situacao==='pendente'?'Pendente':
-       (p.situacao==='feita'||p.situacao==='sincronizada')?'Feita':'Recusada')+
-      (p.lider?'<br>Líder: '+p.lider:'')+
-      (p.situacao!=='pendente'
-        ? '<br><button class="btn btn-sm btn-perigo" style="margin-top:8px" onclick="tornarPendente(\''
-          + encodeURIComponent(p.chave).replace(/'/g,'%27') + '\')">Tornar pendente</button>'
-        : ''));
-    grupo.push([p.lat, p.lng]);
-  });
-
-  // Enquadra o mapa em todos os pontos
-  osMapa.fitBounds(grupo, { padding: [30, 30] });
-
-  // Corrige o tamanho do mapa (Leaflet precisa recalcular quando aparece dentro de aba)
+  osCamadaPontos = L.layerGroup().addTo(osMapa);
+  osMapa.on('moveend', atualizarSelecaoOS); // zoom/arrasto recalcula a seleção
   setTimeout(()=>{ if(osMapa) osMapa.invalidateSize(); }, 200);
+}
+
+function trocarFazendaOS(){
+  const faz = document.getElementById('fFaz').value;
+  const tals = unicos(osPontos.filter(p => !faz || p.fazenda === faz).map(p => p.talhao));
+  document.getElementById('fTal').innerHTML = opcoes(tals, 'Todos os talhões');
+  atualizarOS(true);
+}
+
+function filtradosOS(){
+  const v = id => document.getElementById(id).value;
+  const sit = v('fSit'), faz = v('fFaz'), tal = v('fTal'), num = v('fNum').trim().toLowerCase();
+  return osPontos.filter(p =>
+    (!sit || sitDe(p) === sit) && (!faz || p.fazenda === faz) &&
+    (!tal || p.talhao === tal) && (!num || String(p.numero).toLowerCase().includes(num)));
+}
+
+// Redesenha os marcadores do filtro; "enquadrar" leva o mapa até eles
+function atualizarOS(enquadrar){
+  if(!osMapa) return;
+  const lista = filtradosOS();
+  osCamadaPontos.clearLayers();
+  osMarcadorPorChave = {};
+  lista.forEach(p => {
+    if(p.lat == null) return;
+    const m = L.circleMarker([p.lat, p.lng], {
+      radius: 6, color: '#fff', weight: 1, fillColor: corDoStatus(sitDe(p)), fillOpacity: 0.9
+    }).bindPopup(popupOS(p));
+    osCamadaPontos.addLayer(m);
+    osMarcadorPorChave[p.chave] = m;
+  });
+  if(enquadrar){
+    const coords = lista.filter(p => p.lat != null).map(p => [p.lat, p.lng]);
+    if(coords.length) osMapa.fitBounds(coords, { padding: [30, 30], maxZoom: 17 });
+  }
+  atualizarSelecaoOS();
+}
+
+// Contadores e lista: filtro + (opcional) só o que está na área visível do mapa
+function atualizarSelecaoOS(){
+  if(!osMapa || !document.getElementById('osSelecao')) return;
+  const porArea = document.getElementById('fArea').checked;
+  const b = osMapa.getBounds();
+  const sel = filtradosOS().filter(p => !porArea || (p.lat != null && b.contains([p.lat, p.lng])));
+  const c = {feita:0, pendente:0, recusada:0};
+  sel.forEach(p => { const k = sitDe(p); c[k] = (c[k]||0) + 1; });
+  document.getElementById('osSelecao').innerHTML = `
+    <b>${porArea ? 'Na área do mapa' : 'No filtro'}:</b>
+    <span style="color:var(--verde)">${c.feita} feitas</span> ·
+    <span style="color:var(--vermelho)">${c.pendente} pendentes</span> ·
+    <span style="color:var(--amarelo)">${c.recusada} recusadas</span> ·
+    <b>${sel.length}</b> parcelas`;
+  desenharTabelaOS(sel);
+}
+
+function desenharTabelaOS(lista){
+  const box = document.getElementById('osTabela');
+  if(!lista.length){ box.innerHTML = '<p class="vazio">Nenhuma parcela nesta seleção.</p>'; return; }
+  const cmp = (a, b) => String(a).localeCompare(String(b), 'pt-BR', {numeric:true});
+  const ord = [...lista].sort((a, b) => cmp(a.fazenda, b.fazenda) || cmp(a.talhao, b.talhao) || cmp(a.numero, b.numero));
+  box.innerHTML = `<table><thead><tr>
+      <th>Nº</th><th>Fazenda</th><th>Talhão</th><th>Situação</th><th>Líder</th><th>Data</th><th>Motivo da recusa</th><th></th>
+    </tr></thead><tbody>` +
+    ord.map(p => { const s = sitDe(p); return `<tr>
+      <td><b>${esc(p.numero)}</b></td><td>${esc(p.fazenda)}</td><td>${esc(p.talhao)}</td>
+      <td><span class="selo ${seloSit(s)}">${nomeSit(s)}</span></td>
+      <td>${esc(p.lider || '—')}</td><td>${esc(p.dataHora || '—')}</td><td>${esc(p.motivo)}</td>
+      <td style="white-space:nowrap">
+        ${p.lat != null ? `<button class="btn btn-sm btn-ghost" onclick="verNoMapaOS('${chaveArg(p)}')">Ver</button>` : ''}
+        ${s !== 'pendente' ? `<button class="btn btn-sm btn-perigo" onclick="tornarPendente('${chaveArg(p)}')">Tornar pendente</button>` : ''}
+      </td></tr>`; }).join('') + '</tbody></table>';
+}
+
+function popupOS(p){
+  const s = sitDe(p);
+  return `<b>Parcela ${esc(p.numero)}</b><br>${esc(p.fazenda)} · talhão ${esc(p.talhao)}<br>` +
+    `<span style="color:${corDoStatus(s)};font-weight:600">${nomeSit(s)}</span>` +
+    (p.lider ? `<br>Líder: ${esc(p.lider)}` : '') +
+    (p.dataHora ? `<br>Data: ${esc(p.dataHora)}` : '') +
+    (p.motivo ? `<br>Motivo: ${esc(p.motivo)}` : '') +
+    (s !== 'pendente' ? `<br><button class="btn btn-sm btn-perigo" style="margin-top:8px" onclick="tornarPendente('${chaveArg(p)}')">Tornar pendente</button>` : '');
+}
+
+function verNoMapaOS(arg){
+  const m = osMarcadorPorChave[decodeURIComponent(arg)];
+  if(!m) return;
+  document.getElementById('osMapaBox').scrollIntoView({behavior:'smooth', block:'center'});
+  osMapa.setView(m.getLatLng(), Math.max(osMapa.getZoom(), 17));
+  m.openPopup();
+}
+
+async function tornarPendente(arg){
+  const chave = decodeURIComponent(arg);
+  const p = osPontos.find(x => x.chave === chave);
+  if(!confirm(`Tornar a parcela ${p ? p.numero : chave} PENDENTE de novo?\n\n` +
+    'Avise o líder que fez: ele precisa refazer a parcela no coletor.')) return;
+  try{
+    const r = await fetch('/api/admin/os/' + osAtualId + '/parcela/pendente', {
+      method:'PUT', headers:{...H(),'Content-Type':'application/json'},
+      body: JSON.stringify({ chave })
+    });
+    const d = await r.json();
+    if(!d.success) return alert(d.message || 'Erro ao tornar pendente');
+    // Atualiza na tela sem recarregar (mantém filtros e zoom)
+    if(p){ p.situacao = 'pendente'; p.lider = null; p.dataHora = null; p.motivo = ''; }
+    if(osMapa) osMapa.closePopup();
+    desenharCardsOS();
+    atualizarOS(false);
+  }catch(e){ alert('Erro ao tornar pendente'); }
 }
 
 // ===== ORGANIZAÇÃO: definir a regional de um UA =====

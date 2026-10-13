@@ -1297,17 +1297,19 @@ app.get('/api/admin/os/:osId', auth, checkLicense, async (req, res) => {
             total: Object.values(porLider[lider]).reduce((a, b) => a + b, 0)
         }));
 
-        // Lista enxuta de pontos para o mapa: chave, situação e coordenada.
-        const pontos = os.parcelas
-            .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number')
-            .map(p => ({
-                chave: p.chave,
-                numero: p.numero,
-                situacao: p.situacao || 'pendente',
-                lider: p.lider || null,
-                lat: p.lat,
-                lng: p.lng
-            }));
+        // Todas as parcelas, pro mapa e pra lista (lat/lng nulos quando não há coordenada)
+        const pontos = os.parcelas.map(p => ({
+            chave: p.chave,
+            numero: p.numero || '',
+            fazenda: p.fazenda || '',
+            talhao: p.talhao || '',
+            situacao: p.situacao || 'pendente',
+            lider: p.lider || null,
+            dataHora: p.dataHora || null,
+            motivo: p.motivo || '',
+            lat: typeof p.lat === 'number' ? p.lat : null,
+            lng: typeof p.lng === 'number' ? p.lng : null
+        }));
 
         res.json({
             success: true,
