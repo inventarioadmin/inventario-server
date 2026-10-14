@@ -45,7 +45,8 @@ const syncSchema = new mongoose.Schema({
     timestamp: { type: Date, default: Date.now },
     status: { type: String, enum: ['pending', 'completed', 'error'], default: 'completed' },
     conteudo: { type: String, default: '' }, // NOVO: texto do CSV exportado pelo coletor
-    baixadoEm: { type: Date, default: null }  // NOVO: quando o escritório baixou este arquivo
+    baixadoEm: { type: Date, default: null },  // NOVO: quando o escritório baixou este arquivo
+    carga: { type: String, default: '' }       // NOVO: nome da carga, gravado (não some se a carga for apagada)
 });
 
 const SyncLog = mongoose.model('SyncLog', syncSchema);
@@ -122,6 +123,24 @@ function chavesDoCsv(conteudoCsv) {
         set.add(montarChaveParcela(c[iP], c[iF], c[iT], c[iN]).toUpperCase());
     }
     return set;
+}
+
+// ===== EXPORTAÇÕES: descobre a carga de um CSV — pelas cargas existentes e, se apagada, pela O.S. =====
+async function montarBuscaCarga(companyId) {
+    const uas = await Load.find({ companyId, type: 'parcelas' }).select('description originalName conteudo');
+    const fontes = uas.map(ua => ({ nome: ua.description || ua.originalName, chaves: chavesDoCsv(ua.conteudo) }));
+    const ordens = await OrdemServico.find({ companyId }).select('nome parcelas.chave');
+    ordens.forEach(os => fontes.push({
+        nome: os.nome,
+        chaves: new Set(os.parcelas.map(p => (p.chave || '').toUpperCase()))
+    }));
+    return (conteudo) => {
+        for (const ch of chavesDoCsv(conteudo)) {
+            const achou = fontes.find(c => c.chaves.has(ch));
+            if (achou) return achou.nome;
+        }
+        return '';
+    };
 }
 
 // ===== ORGANIZAÇÃO: extrai contratante e atividade(projeto) da 1ª linha de dados do UA =====
@@ -894,9 +913,13 @@ app.post('/api/app/sync/upload', auth, upload.single('file'), async (req, res) =
         } else {
             // Exportação do coletor
             const androidId = req.body.androidId || 'admin-device';
+            let carga = '';
+            try { carga = (await montarBuscaCarga(req.user.companyId))(conteudoCsv); }
+            catch (e) { console.error('Erro ao identificar carga:', e); }
             const syncLog = new SyncLog({
                 companyId: req.user.companyId,
                 androidId,
+                carga,
                 type: 'upload',
                 filename: `${Date.now()}_${req.file.originalname}`,
                 originalName: req.file.originalname,
@@ -1884,6 +1907,22 @@ app.delete('/api/admin/sync/history/:syncId', auth, checkLicense, async (req, re
     }
 });
 
+// ===== LIMPEZA: excluir VÁRIAS exportações de uma vez (caixas de seleção do portal) =====
+app.post('/api/admin/sync/history/excluir', auth, checkLicense, async (req, res) => {
+    try {
+        const ids = Array.isArray(req.body.ids)
+            ? req.body.ids.filter(id => mongoose.Types.ObjectId.isValid(id)) : [];
+        if (!ids.length) {
+            return res.status(400).json({ success: false, message: 'Nenhum arquivo selecionado' });
+        }
+        const r = await SyncLog.deleteMany({ _id: { $in: ids }, companyId: req.user.companyId });
+        res.json({ success: true, apagados: r.deletedCount });
+    } catch (error) {
+        console.error('Erro ao excluir selecionados:', error);
+        res.status(500).json({ success: false, message: 'Erro: ' + error.message });
+    }
+});
+
 // ===== LIMPEZA: apagar todos os registros de DOWNLOAD (os "Baixado", que só poluem) =====
 app.delete('/api/admin/sync/history-downloads', auth, checkLicense, async (req, res) => {
     try {
@@ -1902,17 +1941,20 @@ app.get('/api/admin/sync/history', auth, checkLicense, async (req, res) => {
         if (req.query.tipo === 'upload' || req.query.tipo === 'download') filtro.type = req.query.tipo;
         const history = await SyncLog.find(filtro).sort({ timestamp: -1 }).limit(300);
 
-        // Descobre de qual carga veio cada exportação, comparando as parcelas
-        const uas = await Load.find({ companyId: req.user.companyId, type: 'parcelas' })
-            .select('description originalName conteudo');
-        const cargas = uas.map(ua => ({ nome: ua.description || ua.originalName, chaves: chavesDoCsv(ua.conteudo) }));
-        const acharCarga = (conteudo) => {
-            for (const ch of chavesDoCsv(conteudo)) {
-                const achou = cargas.find(c => c.chaves.has(ch));
-                if (achou) return achou.nome;
-            }
-            return '';
-        };
+        // Carga de cada exportação: usa a gravada; se não tiver, descobre e GRAVA
+        const semCarga = history.filter(l => l.type === 'upload' && !l.carga);
+        if (semCarga.length) {
+            const acharCarga = await montarBuscaCarga(req.user.companyId);
+            const gravar = [];
+            semCarga.forEach(l => {
+                const nome = acharCarga(l.conteudo);
+                if (nome) {
+                    l.carga = nome;
+                    gravar.push({ updateOne: { filter: { _id: l._id }, update: { $set: { carga: nome } } } });
+                }
+            });
+            if (gravar.length) await SyncLog.bulkWrite(gravar);
+        }
 
         res.json({
             success: true,
@@ -1924,7 +1966,7 @@ app.get('/api/admin/sync/history', auth, checkLicense, async (req, res) => {
                 fileSize: log.fileSize,
                 timestamp: log.timestamp,
                 status: log.status,
-                carga: log.type === 'upload' ? acharCarga(log.conteudo) : '',
+                carga: log.carga || '',
                 baixadoEm: log.baixadoEm || null
             }))
         });

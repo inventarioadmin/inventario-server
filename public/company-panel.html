@@ -368,17 +368,21 @@
     </div>
 
     <div class="secao">
-      <h3 style="display:flex;justify-content:space-between;align-items:center">
+      <h3 style="display:flex;justify-content:space-between;align-items:center;gap:8px">
         Exportações recebidas dos coletores
-        <button class="btn btn-sm btn-ghost" onclick="loadSyncHistory()">Atualizar</button>
+        <span style="display:flex;gap:8px">
+          <button class="btn btn-sm btn-perigo" id="btnExcluirSel" onclick="excluirSelecionadosSync()" disabled>Excluir selecionados (0)</button>
+          <button class="btn btn-sm btn-ghost" onclick="loadSyncHistory()">Atualizar</button>
+        </span>
       </h3>
       <div style="overflow-x:auto">
         <table>
           <thead><tr>
+            <th style="width:30px"><input type="checkbox" id="chkTodosSync" style="width:auto" title="Marcar todos" onchange="marcarTodosSync(this.checked)"></th>
             <th>Data/hora</th><th>Dispositivo</th><th>Arquivo</th>
             <th>Tamanho</th><th>Situação</th><th>Ações</th>
           </tr></thead>
-          <tbody id="syncHistoryList"><tr><td colspan="6" class="vazio">Carregando…</td></tr></tbody>
+          <tbody id="syncHistoryList"><tr><td colspan="7" class="vazio">Carregando…</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -1084,26 +1088,33 @@ async function loadSyncHistory(){
     const r = await fetch('/api/admin/sync/history?tipo=upload',{headers:H()});
     const d = await r.json();
     const tb = document.getElementById('syncHistoryList');
+    document.getElementById('chkTodosSync').checked = false;
     if(!(d.success && d.history.length)){
-      tb.innerHTML = '<tr><td colspan="6" class="vazio">Nenhuma exportação recebida ainda.</td></tr>';
+      tb.innerHTML = '<tr><td colspan="7" class="vazio">Nenhuma exportação recebida ainda.</td></tr>';
+      atualizarBotaoSync();
       return;
     }
     const SEM = 'Carga não identificada';
     const grupos = {};
     d.history.forEach(it=>{ const g = it.carga || SEM; (grupos[g] = grupos[g] || []).push(it); });
     const nomes = Object.keys(grupos).sort((a,b)=> (a===SEM) - (b===SEM)); // não identificadas por último
-    tb.innerHTML = nomes.map(g=>{
+    tb.innerHTML = nomes.map((g, gi)=>{
       const itens = grupos[g];
       const novos = itens.filter(i=>!i.baixadoEm).length;
       return `
-        <tr><td colspan="6" style="background:var(--papel-2);font-weight:600;color:var(--mata)">
-          ${g} <span class="pill">${itens.length} arquivo(s)${novos?` · ${novos} novo(s)`:''}</span>
-        </td></tr>` +
+        <tr>
+          <td style="background:var(--papel-2)"><input type="checkbox" style="width:auto" title="Marcar a carga toda" onchange="marcarGrupoSync(${gi}, this.checked)"></td>
+          <td colspan="6" style="background:var(--papel-2);font-weight:600;color:var(--mata)">
+            ${esc(g)} <span class="pill">${itens.length} arquivo(s)${novos?` · ${novos} novo(s)`:''}</span>
+          </td>
+        </tr>` +
         itens.map(it=>`
         <tr${it.baixadoEm?'':' style="font-weight:600"'}>
+          <td><input type="checkbox" class="chkSync" style="width:auto" value="${it.id}"
+                     data-grupo="${gi}" data-novo="${it.baixadoEm?0:1}" onchange="atualizarBotaoSync()"></td>
           <td>${new Date(it.timestamp).toLocaleString('pt-BR')}</td>
-          <td style="font-family:ui-monospace,monospace;font-size:12px">${it.androidId}</td>
-          <td>${it.filename||''}</td>
+          <td style="font-family:ui-monospace,monospace;font-size:12px">${esc(it.androidId)}</td>
+          <td>${esc(it.filename||'')}</td>
           <td>${formatSize(it.fileSize)}</td>
           <td>${it.baixadoEm
               ? `<span class="selo ok">Baixado ${new Date(it.baixadoEm).toLocaleDateString('pt-BR')}</span>`
@@ -1114,7 +1125,41 @@ async function loadSyncHistory(){
           </td>
         </tr>`).join('');
     }).join('');
+    atualizarBotaoSync();
   }catch(e){ console.error(e); }
+}
+
+function marcarTodosSync(v){
+  document.querySelectorAll('.chkSync').forEach(c => c.checked = v);
+  atualizarBotaoSync();
+}
+function marcarGrupoSync(gi, v){
+  document.querySelectorAll(`.chkSync[data-grupo="${gi}"]`).forEach(c => c.checked = v);
+  atualizarBotaoSync();
+}
+function atualizarBotaoSync(){
+  const n = document.querySelectorAll('.chkSync:checked').length;
+  const b = document.getElementById('btnExcluirSel');
+  b.textContent = `Excluir selecionados (${n})`;
+  b.disabled = !n;
+}
+async function excluirSelecionadosSync(){
+  const marcados = [...document.querySelectorAll('.chkSync:checked')];
+  if(!marcados.length) return;
+  const novos = marcados.filter(c => c.dataset.novo === '1').length;
+  let msg = `Excluir ${marcados.length} arquivo(s) do servidor?`;
+  if(novos) msg += `\n\nATENÇÃO: ${novos} deles ainda NÃO foram baixados por ninguém.`;
+  msg += '\n\nEsta ação não pode ser desfeita.';
+  if(!confirm(msg)) return;
+  try{
+    const r = await fetch('/api/admin/sync/history/excluir', {
+      method:'POST', headers:{...H(),'Content-Type':'application/json'},
+      body: JSON.stringify({ ids: marcados.map(c => c.value) })
+    });
+    const d = await r.json();
+    if(d.success) loadSyncHistory();
+    else alert(d.message||'Erro ao excluir');
+  }catch(e){ alert('Erro ao excluir'); }
 }
 
 async function excluirSync(id){
