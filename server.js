@@ -91,7 +91,17 @@ const osSchema = new mongoose.Schema({
         lider: String,
         dataHora: String,
         motivo: String,
-        reabertaEm: Date // NOVO: quando o escritório tornou a parcela pendente de novo
+        reabertaEm: Date, // NOVO: quando o escritório tornou a parcela pendente de novo
+        // NOVO: horários e tempos vindos do app ("yyyy-MM-dd HH:mm:ss", hora local)
+        horaInicio: String,
+        horaFim: String,
+        tempoCapMin: Number,      // 1ª passada (cadastro: CAP no IFC, altura no IFQ)
+        tempoAlturasMin: Number,  // 2ª passada (alturas medidas depois)
+        nArvores: Number,
+        nFustes: Number,
+        nCaps: Number,
+        nAlturas: Number,
+        area: Number
     }]
 });
 
@@ -1469,6 +1479,14 @@ app.post('/api/app/os/status', auth, checkLicense, async (req, res) => {
             p.lider = st.lider || null;
             p.dataHora = st.dataHora || null;
             p.motivo = (st.situacao === 'recusada') ? (st.motivo || '') : '';
+            // NOVO: horários e tempos (APK antigo não manda: mantém o que já havia)
+            if (st.horaInicio) p.horaInicio = String(st.horaInicio);
+            if (st.horaFim) p.horaFim = String(st.horaFim);
+            const num = (v) => (v === undefined || v === null || v === '') ? undefined : Number(String(v).replace(',', '.'));
+            ['tempoCapMin', 'tempoAlturasMin', 'nArvores', 'nFustes', 'nCaps', 'nAlturas', 'area'].forEach(k => {
+                const n = num(st[k]);
+                if (n !== undefined && !isNaN(n)) p[k] = n;
+            });
             pintadas++;
         }
 
@@ -1484,6 +1502,106 @@ app.post('/api/app/os/status', auth, checkLicense, async (req, res) => {
         });
     } catch (error) {
         console.error('Erro ao receber status:', error);
+        res.status(500).json({ success: false, message: 'Erro: ' + error.message });
+    }
+});
+
+// ===== EQUIPES: jornada, tempos e produção por líder e dia =====
+app.get('/api/admin/equipes', auth, checkLicense, async (req, res) => {
+    try {
+        const ehData = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || '');
+        const diaSP = (d) => d.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+        const ate = ehData(req.query.ate) ? req.query.ate : diaSP(new Date());
+        let de = ehData(req.query.de) ? req.query.de : null;
+        if (!de) {
+            const d = new Date(ate + 'T12:00:00-03:00');
+            d.setDate(d.getDate() - 6);
+            de = diaSP(d);
+        }
+
+        const ordens = await OrdemServico.find({
+            companyId: req.user.companyId,
+            'parcelas.horaInicio': { $gt: '' }
+        }).select('nome parcelas');
+
+        const quando = (s) => s ? new Date(String(s).replace(' ', 'T') + '-03:00') : null;
+        const minutos = (a, b) => (a && b && !isNaN(a) && !isNaN(b)) ? (b - a) / 60000 : null;
+        const distM = (a, b) => {
+            if (a.lat == null || b.lat == null) return null;
+            const R = 6371000, rad = (x) => x * Math.PI / 180;
+            const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+            const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+            return Math.round(2 * R * Math.asin(Math.sqrt(h)));
+        };
+
+        // Agrupa por líder + dia (dia = data do início da parcela)
+        const grupos = {};
+        for (const os of ordens) {
+            for (const p of os.parcelas) {
+                if (!p.horaInicio) continue;
+                const dia = String(p.horaInicio).slice(0, 10);
+                if (dia < de || dia > ate) continue;
+                const lider = p.lider || '(sem líder)';
+                const k = lider + '|' + dia;
+                if (!grupos[k]) grupos[k] = { lider, dia, os: new Set(), itens: [] };
+                grupos[k].os.add(os.nome);
+                grupos[k].itens.push({
+                    numero: p.numero, fazenda: p.fazenda, talhao: p.talhao, situacao: p.situacao,
+                    inicio: p.horaInicio, fim: p.horaFim || '', lat: p.lat, lng: p.lng,
+                    area: p.area ?? null, nArvores: p.nArvores || 0, nCaps: p.nCaps || 0, nAlturas: p.nAlturas || 0,
+                    tempoCapMin: p.tempoCapMin || 0, tempoAlturasMin: p.tempoAlturasMin || 0
+                });
+            }
+        }
+
+        const dias = Object.values(grupos).map(g => {
+            g.itens.sort((a, b) => String(a.inicio).localeCompare(String(b.inicio)));
+            let somaDur = 0, nDur = 0, somaEntre = 0, nEntre = 0, maiorEntre = null;
+            let capMin = 0, nCaps = 0, altMin = 0, nAlt = 0, nArv = 0;
+            g.itens.forEach((it, i) => {
+                it.duracaoMin = minutos(quando(it.inicio), quando(it.fim));
+                if (it.duracaoMin != null && it.duracaoMin >= 0) { somaDur += it.duracaoMin; nDur++; }
+                if (i > 0) {
+                    const ant = g.itens[i - 1];
+                    it.entreMin = minutos(quando(ant.fim), quando(it.inicio));
+                    it.distM = distM(ant, it);
+                    if (it.entreMin != null && it.entreMin >= 0) {
+                        somaEntre += it.entreMin; nEntre++;
+                        maiorEntre = Math.max(maiorEntre ?? 0, it.entreMin);
+                    }
+                }
+                if (it.nCaps > 0) {
+                    // IFC: 1ª passada = CAP; 2ª passada = alturas
+                    if (it.tempoCapMin > 0) { capMin += it.tempoCapMin; nCaps += it.nCaps; }
+                    if (it.tempoAlturasMin > 0 && it.nAlturas > 0) { altMin += it.tempoAlturasMin; nAlt += it.nAlturas; }
+                } else if (it.nAlturas > 0 && it.tempoCapMin > 0) {
+                    // IFQ (sem CAP): a 1ª passada já é a medição das alturas
+                    altMin += it.tempoCapMin; nAlt += it.nAlturas;
+                }
+                nArv += it.nArvores;
+            });
+            const fins = g.itens.map(i => i.fim).filter(Boolean).sort();
+            const inicio = g.itens[0].inicio;
+            const fim = fins.length ? fins[fins.length - 1] : '';
+            return {
+                lider: g.lider, dia: g.dia, os: [...g.os],
+                nParcelas: g.itens.filter(i => i.situacao === 'feita').length,
+                nRecusadas: g.itens.filter(i => i.situacao === 'recusada').length,
+                inicio, fim,
+                jornadaMin: minutos(quando(inicio), quando(fim)),
+                mediaParcelaMin: nDur ? somaDur / nDur : null,
+                mediaEntreMin: nEntre ? somaEntre / nEntre : null,
+                maiorEntreMin: maiorEntre,
+                nArvores: nArv,
+                minPorCap: nCaps ? capMin / nCaps : null,
+                minPorAltura: nAlt ? altMin / nAlt : null,
+                parcelas: g.itens
+            };
+        }).sort((a, b) => b.dia.localeCompare(a.dia) || a.lider.localeCompare(b.lider));
+
+        res.json({ success: true, de, ate, dias });
+    } catch (error) {
+        console.error('Erro nos indicadores de equipes:', error);
         res.status(500).json({ success: false, message: 'Erro: ' + error.message });
     }
 });
@@ -1545,6 +1663,9 @@ app.put('/api/admin/os/:osId/parcela/pendente', auth, checkLicense, async (req, 
         p.dataHora = null;
         p.motivo = '';
         p.reabertaEm = new Date();
+        // NOVO: a medição vai ser refeita — limpa horários e tempos antigos
+        ['horaInicio', 'horaFim', 'tempoCapMin', 'tempoAlturasMin', 'nArvores', 'nFustes', 'nCaps', 'nAlturas']
+            .forEach(k => { p[k] = undefined; });
         os.markModified('parcelas');
         await os.save();
         res.json({ success: true });

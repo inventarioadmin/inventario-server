@@ -303,6 +303,7 @@
     <button class="aba on" data-alvo="pDispositivos">Dispositivos</button>
     <button class="aba" data-alvo="pSync">Cargas &amp; Sincronização</button>
     <button class="aba" data-alvo="pOS">Ordens de Serviço</button>
+    <button class="aba" data-alvo="pEquipes">Equipes</button>
   </div>
 
   <!-- DISPOSITIVOS -->
@@ -404,6 +405,36 @@
     </div>
     <div id="osDetalhe"></div>
   </div>
+
+  <!-- EQUIPES -->
+  <div class="painel" id="pEquipes">
+    <div class="secao">
+      <h3 style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        Equipes — jornada e produção
+        <button class="btn btn-sm btn-ghost" onclick="loadEquipes()">Atualizar</button>
+      </h3>
+      <div class="filtros-cargas">
+        <div><label for="eqDe">De</label><input type="date" id="eqDe" onchange="loadEquipes()"></div>
+        <div><label for="eqAte">Até</label><input type="date" id="eqAte" onchange="loadEquipes()"></div>
+        <div><label for="eqLider">Líder</label><select id="eqLider" onchange="desenharEquipes()"><option value="">Todos os líderes</option></select></div>
+      </div>
+      <div id="eqCards"></div>
+      <div style="overflow-x:auto;margin-top:8px">
+        <table>
+          <thead><tr>
+            <th>Dia</th><th>Líder</th><th>Início</th><th>Fim</th><th>Jornada</th>
+            <th>Parcelas</th><th>Méd. parcela</th><th>Méd. entre</th><th>Maior intervalo</th>
+            <th>Árvores</th><th>min/CAP</th><th>min/altura</th><th></th>
+          </tr></thead>
+          <tbody id="eqTabela"><tr><td colspan="13" class="vazio">Carregando…</td></tr></tbody>
+        </table>
+      </div>
+      <p style="font-size:12px;color:var(--tinta-3);margin:10px 0 0">
+        Início = chegada na 1ª parcela (hora do GPS). Fim = conclusão da última. "Entre" = do fim de uma parcela até a chegada na próxima.
+        Só aparecem parcelas feitas com o APK novo.
+      </p>
+    </div>
+  </div>
 </div>
 
 <!-- Janela de escolha (Parâmetro / Regional) -->
@@ -478,6 +509,7 @@ document.querySelectorAll('.aba').forEach(b=>{
     document.getElementById(b.dataset.alvo).classList.add('on');
     if(b.dataset.alvo==='pSync'){ loadCargas(); loadSyncHistory(); }
     if(b.dataset.alvo==='pOS'){ loadOrdens(); }
+    if(b.dataset.alvo==='pEquipes'){ loadEquipes(); }
   };
 });
 
@@ -867,6 +899,99 @@ async function tornarPendente(arg){
     desenharCardsOS();
     atualizarOS(false);
   }catch(e){ alert('Erro ao tornar pendente'); }
+}
+
+// ===== EQUIPES: jornada, tempos e produção =====
+let eqDados = [];
+let eqVisiveis = [];
+const eqHora = s => s ? String(s).slice(11, 16) : '—';
+const eqDur = m => (m == null || isNaN(m)) ? '—'
+  : (m >= 60 ? Math.floor(m / 60) + 'h' + String(Math.round(m % 60)).padStart(2, '0') : Math.round(m) + ' min');
+const eqNum = v => (v == null || isNaN(v)) ? '—' : Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+const eqDia = s => String(s).split('-').reverse().join('/');
+
+async function loadEquipes(){
+  const de = document.getElementById('eqDe'), ate = document.getElementById('eqAte');
+  const q = new URLSearchParams();
+  if(de.value) q.set('de', de.value);
+  if(ate.value) q.set('ate', ate.value);
+  const tb = document.getElementById('eqTabela');
+  tb.innerHTML = '<tr><td colspan="13" class="vazio">Carregando…</td></tr>';
+  try{
+    const d = await (await fetch('/api/admin/equipes?' + q.toString(), { headers: H() })).json();
+    if(!d.success){ tb.innerHTML = '<tr><td colspan="13" class="vazio">' + esc(d.message || 'Erro') + '</td></tr>'; return; }
+    de.value = d.de; ate.value = d.ate;
+    eqDados = d.dias || [];
+    const sel = document.getElementById('eqLider'), atual = sel.value;
+    sel.innerHTML = '<option value="">Todos os líderes</option>' +
+      unicos(eqDados.map(x => x.lider)).map(l => `<option value="${esc(l)}" ${l === atual ? 'selected' : ''}>${esc(l)}</option>`).join('');
+    desenharEquipes();
+  }catch(e){
+    console.error(e);
+    tb.innerHTML = '<tr><td colspan="13" class="vazio">Erro ao carregar indicadores.</td></tr>';
+  }
+}
+
+function desenharEquipes(){
+  const lid = document.getElementById('eqLider').value;
+  eqVisiveis = eqDados.filter(x => !lid || x.lider === lid);
+  const media = arr => { const v = arr.filter(x => x != null && !isNaN(x)); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+  const totParc = eqVisiveis.reduce((a, x) => a + x.nParcelas, 0);
+
+  document.getElementById('eqCards').innerHTML = `
+    <div class="dashboard-resumo">
+      <div class="dash-card"><div class="dash-num">${totParc}</div><div class="dash-label">Parcelas feitas no período</div></div>
+      <div class="dash-card"><div class="dash-num">${eqNum(media(eqVisiveis.map(x => x.nParcelas)))}</div><div class="dash-label">Parcelas por dia por equipe</div></div>
+      <div class="dash-card equipes"><div class="dash-num">${eqDur(media(eqVisiveis.map(x => x.jornadaMin)))}</div><div class="dash-label">Jornada média</div></div>
+      <div class="dash-card alerta"><div class="dash-num">${eqDur(media(eqVisiveis.map(x => x.mediaParcelaMin)))}</div><div class="dash-label">Tempo médio por parcela</div></div>
+    </div>`;
+
+  const tb = document.getElementById('eqTabela');
+  if(!eqVisiveis.length){
+    tb.innerHTML = '<tr><td colspan="13" class="vazio">Sem dados de horário neste período. Os horários começam a chegar quando as equipes usarem o APK novo e sincronizarem.</td></tr>';
+    return;
+  }
+  tb.innerHTML = eqVisiveis.map((x, i) => `
+    <tr>
+      <td>${eqDia(x.dia)}</td>
+      <td><b>${esc(x.lider)}</b></td>
+      <td>${eqHora(x.inicio)}</td>
+      <td>${eqHora(x.fim)}</td>
+      <td${x.jornadaMin > 600 ? ' style="color:var(--vermelho);font-weight:600"' : ''}>${eqDur(x.jornadaMin)}</td>
+      <td>${x.nParcelas}${x.nRecusadas ? ` <span class="selo rec">${x.nRecusadas} rec.</span>` : ''}</td>
+      <td>${eqDur(x.mediaParcelaMin)}</td>
+      <td>${eqDur(x.mediaEntreMin)}</td>
+      <td${x.maiorEntreMin > 60 ? ' style="color:var(--amarelo);font-weight:600"' : ''}>${eqDur(x.maiorEntreMin)}</td>
+      <td>${x.nArvores}</td>
+      <td>${eqNum(x.minPorCap)}</td>
+      <td>${eqNum(x.minPorAltura)}</td>
+      <td><button class="btn btn-sm btn-ghost" onclick="verDiaEquipe(${i})">Ver</button></td>
+    </tr>
+    <tr id="eqDet-${i}" style="display:none"><td colspan="13" style="background:var(--papel)"></td></tr>`).join('');
+}
+
+function verDiaEquipe(i){
+  const linha = document.getElementById('eqDet-' + i);
+  if(linha.style.display !== 'none'){ linha.style.display = 'none'; return; }
+  const x = eqVisiveis[i];
+  linha.firstElementChild.innerHTML = `
+    <div style="font-size:13px;margin-bottom:6px"><b>${esc(x.lider)}</b> · ${eqDia(x.dia)} · ${x.os.map(esc).join(', ')}</div>
+    <table>
+      <thead><tr><th>Nº</th><th>Fazenda</th><th>Talhão</th><th>Situação</th><th>Início</th><th>Fim</th>
+        <th>Duração</th><th>Intervalo antes</th><th>Distância antes</th><th>Árvores</th><th>Área (m²)</th></tr></thead>
+      <tbody>${x.parcelas.map(p => `
+        <tr>
+          <td><b>${esc(p.numero)}</b></td><td>${esc(p.fazenda)}</td><td>${esc(p.talhao)}</td>
+          <td><span class="selo ${seloSit(p.situacao)}">${nomeSit(p.situacao)}</span></td>
+          <td>${eqHora(p.inicio)}</td><td>${eqHora(p.fim)}</td>
+          <td>${eqDur(p.duracaoMin)}</td>
+          <td${p.entreMin > 60 ? ' style="color:var(--amarelo);font-weight:600"' : ''}>${p.entreMin == null ? '—' : eqDur(p.entreMin)}</td>
+          <td>${p.distM == null ? '—' : (p.distM >= 1000 ? eqNum(p.distM / 1000) + ' km' : p.distM + ' m')}</td>
+          <td>${p.nArvores || '—'}</td><td>${eqNum(p.area)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+  linha.style.display = '';
 }
 
 // ===== JANELA DE ESCOLHA =====
