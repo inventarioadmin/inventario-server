@@ -101,7 +101,9 @@ const osSchema = new mongoose.Schema({
         nFustes: Number,
         nCaps: Number,
         nAlturas: Number,
-        area: Number
+        area: Number,
+        foraIndicadores: Boolean,  // NOVO: excluída das médias (teste, treinamento, quebra...)
+        motivoExclusao: String
     }]
 });
 
@@ -817,6 +819,25 @@ app.put('/api/devices/:androidId/toggle', auth, async (req, res) => {
         res.json({ success: true, device });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Erro ao alterar status do dispositivo' });
+    }
+});
+
+// NOVO: renomear (descrição) do dispositivo — ex.: coletor mudou de líder
+app.put('/api/devices/:androidId/descricao', auth, async (req, res) => {
+    try {
+        const descricao = String(req.body.description || '').trim();
+        if (!descricao) {
+            return res.status(400).json({ success: false, message: 'Digite a descrição' });
+        }
+        const device = await Device.findOne({ androidId: req.params.androidId, companyId: req.user.companyId });
+        if (!device) {
+            return res.status(404).json({ success: false, message: 'Dispositivo não encontrado' });
+        }
+        device.description = descricao.slice(0, 80);
+        await device.save();
+        res.json({ success: true, device });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Erro ao renomear dispositivo' });
     }
 });
 
@@ -1546,47 +1567,53 @@ app.get('/api/admin/equipes', auth, checkLicense, async (req, res) => {
                 if (!grupos[k]) grupos[k] = { lider, dia, os: new Set(), itens: [] };
                 grupos[k].os.add(os.nome);
                 grupos[k].itens.push({
-                    numero: p.numero, fazenda: p.fazenda, talhao: p.talhao, situacao: p.situacao,
+                    chave: p.chave, numero: p.numero, fazenda: p.fazenda, talhao: p.talhao, situacao: p.situacao,
                     inicio: p.horaInicio, fim: p.horaFim || '', lat: p.lat, lng: p.lng,
                     area: p.area ?? null, nArvores: p.nArvores || 0, nCaps: p.nCaps || 0, nAlturas: p.nAlturas || 0,
-                    tempoCapMin: p.tempoCapMin || 0, tempoAlturasMin: p.tempoAlturasMin || 0
+                    tempoCapMin: p.tempoCapMin || 0, tempoAlturasMin: p.tempoAlturasMin || 0,
+                    fora: !!p.foraIndicadores, motivoExclusao: p.motivoExclusao || ''
                 });
             }
         }
 
         const dias = Object.values(grupos).map(g => {
             g.itens.sort((a, b) => String(a.inicio).localeCompare(String(b.inicio)));
+            const algumValido = g.itens.some(i => !i.fora);
+            // dia todo excluído: calcula com tudo só pra exibir (não entra nos números da tela)
+            const conta = (it) => algumValido ? !it.fora : true;
             let somaDur = 0, nDur = 0, somaEntre = 0, nEntre = 0, maiorEntre = null;
             let capMin = 0, nCaps = 0, altMin = 0, nAlt = 0, nArv = 0;
             g.itens.forEach((it, i) => {
                 it.duracaoMin = minutos(quando(it.inicio), quando(it.fim));
-                if (it.duracaoMin != null && it.duracaoMin >= 0) { somaDur += it.duracaoMin; nDur++; }
                 if (i > 0) {
                     const ant = g.itens[i - 1];
                     it.entreMin = minutos(quando(ant.fim), quando(it.inicio));
                     it.distM = distM(ant, it);
-                    if (it.entreMin != null && it.entreMin >= 0) {
-                        somaEntre += it.entreMin; nEntre++;
-                        maiorEntre = Math.max(maiorEntre ?? 0, it.entreMin);
-                    }
                 }
+                if (!conta(it)) return;
+                if (it.duracaoMin != null && it.duracaoMin >= 0) { somaDur += it.duracaoMin; nDur++; }
+                if (i > 0 && conta(g.itens[i - 1]) && it.entreMin != null && it.entreMin >= 0) {
+                    somaEntre += it.entreMin; nEntre++;
+                    maiorEntre = Math.max(maiorEntre ?? 0, it.entreMin);
+                }
+                // Tempo de cadastro vai da 1ª à última árvore salva = cobre (N - 1) árvores
                 if (it.nCaps > 0) {
-                    // IFC: 1ª passada = CAP; 2ª passada = alturas
-                    if (it.tempoCapMin > 0) { capMin += it.tempoCapMin; nCaps += it.nCaps; }
+                    if (it.tempoCapMin > 0 && it.nCaps > 1) { capMin += it.tempoCapMin; nCaps += it.nCaps - 1; }
                     if (it.tempoAlturasMin > 0 && it.nAlturas > 0) { altMin += it.tempoAlturasMin; nAlt += it.nAlturas; }
-                } else if (it.nAlturas > 0 && it.tempoCapMin > 0) {
+                } else if (it.nAlturas > 1 && it.tempoCapMin > 0) {
                     // IFQ (sem CAP): a 1ª passada já é a medição das alturas
-                    altMin += it.tempoCapMin; nAlt += it.nAlturas;
+                    altMin += it.tempoCapMin; nAlt += it.nAlturas - 1;
                 }
                 nArv += it.nArvores;
             });
-            const fins = g.itens.map(i => i.fim).filter(Boolean).sort();
-            const inicio = g.itens[0].inicio;
+            const usados = g.itens.filter(conta);
+            const fins = usados.map(i => i.fim).filter(Boolean).sort();
+            const inicio = usados[0].inicio;
             const fim = fins.length ? fins[fins.length - 1] : '';
             return {
                 lider: g.lider, dia: g.dia, os: [...g.os],
-                nParcelas: g.itens.filter(i => i.situacao === 'feita').length,
-                nRecusadas: g.itens.filter(i => i.situacao === 'recusada').length,
+                nParcelas: usados.filter(i => i.situacao === 'feita').length,
+                nRecusadas: usados.filter(i => i.situacao === 'recusada').length,
                 inicio, fim,
                 jornadaMin: minutos(quando(inicio), quando(fim)),
                 mediaParcelaMin: nDur ? somaDur / nDur : null,
@@ -1595,6 +1622,8 @@ app.get('/api/admin/equipes', auth, checkLicense, async (req, res) => {
                 nArvores: nArv,
                 minPorCap: nCaps ? capMin / nCaps : null,
                 minPorAltura: nAlt ? altMin / nAlt : null,
+                excluido: !algumValido,
+                motivoExclusao: algumValido ? '' : (g.itens[0].motivoExclusao || ''),
                 parcelas: g.itens
             };
         }).sort((a, b) => b.dia.localeCompare(a.dia) || a.lider.localeCompare(b.lider));
@@ -1602,6 +1631,39 @@ app.get('/api/admin/equipes', auth, checkLicense, async (req, res) => {
         res.json({ success: true, de, ate, dias });
     } catch (error) {
         console.error('Erro nos indicadores de equipes:', error);
+        res.status(500).json({ success: false, message: 'Erro: ' + error.message });
+    }
+});
+
+// ===== EQUIPES: tirar (ou devolver) um dia ou parcelas das médias — não apaga nada =====
+app.put('/api/admin/equipes/exclusao', auth, checkLicense, async (req, res) => {
+    try {
+        const { lider, dia, chaves, excluir, motivo } = req.body;
+        if (!lider || !/^\d{4}-\d{2}-\d{2}$/.test(dia || '')) {
+            return res.status(400).json({ success: false, message: 'Informe líder e dia' });
+        }
+        const soEstas = Array.isArray(chaves) && chaves.length ? new Set(chaves) : null;
+        const ordens = await OrdemServico.find({
+            companyId: req.user.companyId,
+            'parcelas.horaInicio': { $regex: '^' + dia }
+        });
+        let alteradas = 0;
+        for (const os of ordens) {
+            let mudou = false;
+            for (const p of os.parcelas) {
+                if ((p.lider || '(sem líder)') !== lider) continue;
+                if (!String(p.horaInicio || '').startsWith(dia)) continue;
+                if (soEstas && !soEstas.has(p.chave)) continue;
+                p.foraIndicadores = !!excluir;
+                p.motivoExclusao = excluir ? String(motivo || '').slice(0, 200) : '';
+                alteradas++;
+                mudou = true;
+            }
+            if (mudou) { os.markModified('parcelas'); await os.save(); }
+        }
+        res.json({ success: true, alteradas });
+    } catch (error) {
+        console.error('Erro ao excluir dos indicadores:', error);
         res.status(500).json({ success: false, message: 'Erro: ' + error.message });
     }
 });
